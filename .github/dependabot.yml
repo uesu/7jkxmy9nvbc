@@ -1,0 +1,36 @@
+# Dependabot — automatic dependency updates (repo Settings > Code security and
+# analysis > Dependabot alerts & security updates must be ON for security PRs;
+# version updates below work regardless).
+#
+# Weekly check for the pip dependencies (feedparser, aiohttp, python-dotenv)
+# and the GitHub Actions used in the workflows. Each update opens a PULL
+# REQUEST — nothing touches main until you review + merge it (or you enable
+# the opt-in auto-merge workflow — see docs/DEPENDABOT.md). The Actions job
+# reinstalls deps every run, so a merged PR changes behavior on the next
+# trigger.
+#
+# To DISABLE completely: delete this file. The monitor is unaffected.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps(python)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps(actions)"
