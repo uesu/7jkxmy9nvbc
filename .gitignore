@@ -1,0 +1,36 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Runtime cache data (kept in the repo via `git add -f` in the workflows)
+posted_tweets.json
+posted_reddit.json
+proxy_health.json
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Local logs
+*.log
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE & editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
