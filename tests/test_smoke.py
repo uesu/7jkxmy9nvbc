@@ -499,8 +499,7 @@ for module in (v3, proxy):
                   "posting guidelines</a>")
           == "[posting guidelines]"
              "(https://www.reddit.com/r/Genshin_Impact_Leaks/wiki/posting_guidelines/)")
-    check("r16 mangled link shape -> 3 label lines + 3 clickable URL lines "
-          "(round 19: label and URL on separate lines, 1whe2tr target look)",
+    check("r16 mangled 3-line link shape repairs to 3 URL-labelled lines",
           cleaner("Firefly](https://b23.tv/prev0)\n"
                   "Firefly) video [[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
                   "Feixiao](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
@@ -508,9 +507,9 @@ for module in (v3, proxy):
                   "Therta](https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
                   "Therta) video [[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)]"
                   "(https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u))")
-          == "Firefly video\n[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
-             "Feixiao video\n[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
-             "Therta video\n[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
+          == "Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+             "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+             "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
 
 check("r15 author underscore", v3._clean_author_name(
     "](https://reddit.com/post)\n*by) Knight_Steve_") == "Knight_Steve_")
@@ -1073,40 +1072,87 @@ check("r18 kept: empty body is NOT removed (link posts)",
 check("r18 kept: normal body mentioning a pull",
       v3.removed_post_reason("T", "The previous leak was pulled. Here is the new build list...") is None)
 
-# ---- round 19: 'label line + bare URL' mangle repair (post 1whe2tr family)
-_r19_mangled = ("Firefly video [[[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
-                "Feixiao](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
-                "Feixiao) video [[[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
-                "Therta](https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
-                "Therta) video [[[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)]"
+# ---- round 20: simple plain-link mangle fix (post 1whe2tr, final form) ---
+_r20_mangled = ("Firefly video [[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)]"
+                "(https://b23.tv/dkCXgES](https://b23.tv/dkCXgES))\n\n"
+                "Feixiao video [[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)]"
+                "(https://b23.tv/XojBeMr](https://b23.tv/XojBeMr))\n\n"
+                "Therta video [[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)]"
                 "(https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u))")
-_r19_expected = ("Firefly video\n[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
-                 "Feixiao video\n[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
-                 "Therta video\n[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
-check("r19 mangle: 1whe2tr family -> label line + clickable URL line (v3)",
-      v3.clean_rss_body(_r19_mangled) == _r19_expected,
-      v3.clean_rss_body(_r19_mangled))
-check("r19 mangle: same result via the proxy cleaner",
-      proxy.clean_proxy_body(_r19_mangled) == _r19_expected,
-      proxy.clean_proxy_body(_r19_mangled))
-_r19_clean = ("Firefly video\nhttps://b23.tv/dkCXgES\n\n"
+_r20_expected = ("Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                 "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                 "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
+check("r20 link: doubled mangle -> one plain link per line (v3)",
+      v3.clean_rss_body(_r20_mangled) == _r20_expected,
+      v3.clean_rss_body(_r20_mangled))
+check("r20 link: same result via the proxy cleaner",
+      proxy.clean_proxy_body(_r20_mangled) == _r20_expected,
+      proxy.clean_proxy_body(_r20_mangled))
+_r20_plain = ("Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES))\n\n"
+              "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr](https://b23.tv/XojBeMr))\n\n"
+              "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u))")
+check("r20 link: feed plain face (URL x3) -> one plain link per line",
+      v3.clean_rss_body(_r20_plain) == _r20_expected,
+      v3.clean_rss_body(_r20_plain))
+_r20_deep = ("Firefly video [[[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)]"
+             "(https://b23.tv/dkCXgES](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)]"
+             "(https://b23.tv/dkCXgES](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES))"
+             "(https://b23.tv/dkCXgES](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES))))")
+check("r20 link: deep nested mangle -> one plain link",
+      v3.clean_rss_body(_r20_deep)
+      == "Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)",
+      v3.clean_rss_body(_r20_deep))
+check("r20 kept: a single clean link line is untouched",
+      v3.clean_rss_body("Firefly video [https://b23.tv/x](https://b23.tv/x)")
+      == "Firefly video [https://b23.tv/x](https://b23.tv/x)",
+      v3.clean_rss_body("Firefly video [https://b23.tv/x](https://b23.tv/x)"))
+_r20_clean = ("Firefly video\nhttps://b23.tv/dkCXgES\n\n"
               "Feixiao video\nhttps://b23.tv/XojBeMr")
-check("r19 mangle: clean bare-URL body keeps the same look",
-      v3.clean_rss_body(_r19_clean)
+check("r20 kept: clean bare-URL body keeps the same look",
+      v3.clean_rss_body(_r20_clean)
       == "Firefly video\n[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
          "Feixiao video\n[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)",
-      v3.clean_rss_body(_r19_clean))
-check("r19 kept: single-bracket URL-labelled link line untouched",
-      v3.clean_rss_body("Play the demo at [https://b23.tv/x](https://b23.tv/x)")
-      == "Play the demo at [https://b23.tv/x](https://b23.tv/x)",
-      v3.clean_rss_body("Play the demo at [https://b23.tv/x](https://b23.tv/x)"))
-_r19_unpaired = "Firefly video\nFeixiao](https://b23.tv/x](https://b23.tv/x)"
-check("r19 kept: unpaired fragment line dropped, label kept",
-      v3.clean_rss_body(_r19_unpaired) == "Firefly video",
-      v3.clean_rss_body(_r19_unpaired))
-check("r19 kept: mangled body is NOT treated as removed (1whe2tr)",
+      v3.clean_rss_body(_r20_clean))
+check("r20 kept: mangled body is NOT treated as removed (1whe2tr)",
       v3.removed_post_reason("4.6 Event Firefly, Feixiao and The Herta gameplay",
-                             _r19_mangled) is None)
+                             _r20_mangled) is None)
+
+# ---- round 20: archive post liveness gate (offline, stubbed sources) -----
+_r20_proxy_result = {"holder": None}
+
+class _R20FakeProxy:
+    async def fetch_proxy_post(self, session, path, label="", health=None, need_video=False):
+        return _r20_proxy_result["holder"]
+
+async def _r20_gate():
+    orig_proxy, orig_base = v3.reddit_proxy, v3.fetch_test_post_base
+    v3.reddit_proxy = _R20FakeProxy()
+    try:
+        v3.fetch_test_post_base = AsyncMock(return_value=None)
+        _r20_proxy_result["holder"] = None
+        live, why = await v3.verify_archive_post_live(None, "/r/Sub/comments/x/", label="t")
+        check("r20 gate: no live source can see the post -> not live",
+              live is False and "pending approval" in why, why)
+        _r20_proxy_result["holder"] = {"service": "redditez", "title": "T", "author": None,
+                                       "subreddit": None, "body": "", "stats": None, "media": []}
+        live, why = await v3.verify_archive_post_live(None, "/r/Sub/comments/x/", label="t")
+        check("r20 gate: proxy chain retrieves the post -> live",
+              live is True and "redditez" in why, why)
+        _r20_proxy_result["holder"] = {"service": "redditez", "title": "T", "author": None,
+                                       "subreddit": None, "body": "[ Removed by moderator ]",
+                                       "stats": None, "media": []}
+        live, why = await v3.verify_archive_post_live(None, "/r/Sub/comments/x/", label="t")
+        check("r20 gate: live source still shows a removal notice -> not live",
+              live is False and "removal notice" in why, why)
+        _r20_proxy_result["holder"] = None
+        v3.fetch_test_post_base = AsyncMock(return_value={"title": "T", "body": "b"})
+        live, why = await v3.verify_archive_post_live(None, "/r/Sub/comments/x/", label="t")
+        check("r20 gate: redlib retrieves the post -> live",
+              live is True and "redlib" in why, why)
+    finally:
+        v3.reddit_proxy, v3.fetch_test_post_base = orig_proxy, orig_base
+
+asyncio.run(_r20_gate())
 
 asyncio.run(round15_flows())
 asyncio.run(round15_fetch())

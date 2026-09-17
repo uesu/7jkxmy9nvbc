@@ -666,6 +666,15 @@ credits, no API key):
   garbage. A new pre-pass in BOTH body cleaners (RSS + proxy) repairs the
   family to one label line + one clickable URL line per pair (the X-card
   look); nothing else in the body pipeline changed.
+* **Round 20 follow-up (same day, from the live run):** two fixes. (1)
+  The link fix is now the SIMPLE one: ANY mangle face collapses to ONE
+  plain line with the URL once — `Firefly video [https://b23.tv/…](https://b23.tv/…)`
+  — exactly like the original post (replaces the round-19 rule; works at
+  any nesting depth; clean lines untouched). (2) Archive-sourced posts
+  are now verified against the live sources (redditez → vxreddit →
+  embeddit → redlib) before posting: a post that is removed, deleted or
+  still pending approval is invisible to them, so it is skipped and NOT
+  cached — and posts normally once approved/restored.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1205,6 +1214,33 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 20 (Reddit V3): archive liveness gate + the simple
+  plain-link fix** (follow-up to the round-19 live run):
+  * **Archive (Arctic) posts are now verified live before posting.**
+    The archive keeps posts that are no longer live on reddit — removed
+    by moderators, deleted by the author, or still pending approval in a
+    mod queue — and its stored body is often the ORIGINAL content, which
+    is why the removal-notice filter could not catch them. An
+    archive-sourced post is now only posted when a live source (redditez
+    → vxreddit → embeddit, then redlib) can actually retrieve it;
+    otherwise it is skipped and NOT cached, so it posts normally once
+    approved or restored. Log line: `[<sub>_<id>] archive post not
+    verified live (…) — skipping, not cached (will post once
+    approved/restored).` RSS-sourced posts and TEST POST rebuilds are
+    unaffected.
+  * **The link fix is now the simple one** (replaces the round-19 rule):
+    any mangle face — `label [[U](U)](U](U))`, `label [U](U](U))`, or
+    deeper nesting — collapses to ONE plain line with the URL exactly
+    once: `label [U](U)`, exactly like the original post (auto-links
+    itself as a blue clickable link in the component v2 container).
+    Clean links, repeated real links, bare-URL lines and every round
+    15/16 shape are byte-identical.
+  * Smoke test: 11 new checks (4 liveness-gate + 7 link; the round-16
+    mangle check returns to its original same-line expectation —
+    `tests/test_smoke.py` — 219 total).
+  * Nothing else changed: RSS, proxies, FULL MODE, YouTube, crossposts,
+    the round-18 removal filter all run exactly as before.
 
 * **2026-09-17 — round 19 (Reddit V3): 'label line + bare URL' link mangle
   repair** (follow-up to the round-18 live run — post 1whe2tr):

@@ -142,6 +142,21 @@
 #       reddit_proxy.py's clean_proxy_body) repairs the family to one label
 #       line + one clickable URL line per pair. Every other line shape is
 #       untouched; the round 15/16 mangle repairs are unchanged.
+#   17. (round 20, 2026-09-17) TWO FOLLOW-UPS: (a) the link mangle fix is
+#       now the SIMPLE one — a mangled line (the feed's doubled/nested
+#       '[[U](U)](U](U))' garbage, its '[U](U](U))' plain face, or any
+#       deeper nesting) collapses to ONE plain line with the URL exactly
+#       once, 'label [U](U)', exactly like the original post (replaces
+#       the round-19 rule; clean lines and the round 15/16 shapes stay
+#       byte-identical). (b) ARCHIVE LIVENESS GATE: the Arctic archive
+#       (round 17) keeps posts that are no longer live on reddit —
+#       removed by moderators, deleted by the author, or still pending
+#       approval — often with the ORIGINAL body stored, which the
+#       removal-notice filter cannot see. An archive-sourced post is now
+#       only posted when a live source (redditez -> vxreddit -> embeddit,
+#       then redlib) can actually retrieve it; otherwise it is skipped
+#       and NOT cached, so it posts normally once approved or restored.
+#       RSS posts and TEST POST rebuilds are unaffected.
 #
 # ■ WORKFLOW: identical to V1/V2. Test-area first:
 #   run: python "testing area/reddit_main_v3.py"
@@ -667,84 +682,112 @@ def strip_html(value: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ■ ROUND 19 (2026-09-17): 'LABEL LINE + BARE URL' MANGLE REPAIR
-# The feed's auto-linker can mangle a body made of "label line + bare URL
-# line" pairs (live example: post 1whe2tr — 'Firefly video' /
-# 'https://b23.tv/...' / blank / 'Feixiao video' / ...): it doubles or
-# triples the opening '[' of the URL-labelled link on the label line,
-# glues doubled tail fragments '](U](U))' after the last link, and
-# duplicates the next label's first word as a dangling 'Word](U](U)'
-# line before the 'Word) rest ...' continuation line. This pre-pass
-# (run BEFORE repair_mangled_link_lines) collapses the family back to one
-# label line + one bare URL line per pair; the existing bare-URL rule in
-# _line_stage then makes each URL a clickable line. Lines without the
-# doubled-bracket signature are left byte-identical, so the round 15/16
-# mangle shapes keep their existing repair path.
+# ■ ROUND 20 (2026-09-17): SIMPLE 'PLAIN LINK' MANGLE FIX (post 1whe2tr)
+# Replaces the round 19 rule with the simple fix. The original post is a
+# PLAIN link line ("Firefly video" + a bare URL), so a mangled line — the
+# feed's doubled/nested URL-link garbage, e.g.
+#   Firefly video [[U](U)](U](U))     (the doubled card shape)
+#   Firefly video [U](U](U))          (the feed's plain shape)
+#   or any deeper nesting of the same shape
+# — collapses to ONE clean line with the URL exactly once, as a plain
+# clickable link, exactly like the original post:
+#   Firefly video [U](U)
+# Detection (all must hold): the line's URL appears 2+ times (a mangle
+# repeats it), the URL sits right after a markdown '[' opener, and the
+# line is not fully explained by well-formed '[text](url)' links + prose
+# (a mangle leaves the URL in garbage tails like '](U](U))' or
+# unbalanced brackets). Clean single links, repeated real links, bare-URL
+# lines, prose and every round 15/16 shape are left byte-identical;
+# repair_mangled_link_lines still runs after this pre-pass and keeps
+# handling the multi-line family exactly as before.
 # ---------------------------------------------------------------------------
-_R19_TAIL_OK = re.compile(r"(?:\]\(https?://[^\s\[\]]*\)?[\)\]]*)*$")
-_R19_PAIR = re.compile(
-    r"^(?P<label>.+?)[ \t]*(?:\[[ \t]*)+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)(?P<tail>.*)$")
-_R19_WHOLE = re.compile(
-    r"^(?:\[[ \t]*)+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)(?P<tail>.*)$")
-_R19_BFRAG = re.compile(
-    r"^(?P<w>[^\s\[\]]+)\]\(https?://[^\s\[\]]*\]\(https?://[^\s\[\]]*\)?$")
-_R19_WCONT = re.compile(r"^(?P<w>\S+)\)[ \t]+(?P<rest>.*)$")
-_R19_CLEANLINK = re.compile(
-    r"^(?P<label>.+?)[ \t]+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)$")
+_LINK_OK = re.compile(r"\[[^\[\]]*\]\(https?://[^\s()]*\)")
 
-
-def _r19_split_label_link(line: str) -> list:
-    """'label [[[U](U) <glue-tail>' -> ['label', 'U']; a whole line of
-    doubled brackets + URL-labelled link (+ glue tail) -> ['U']. A
-    single-bracket '[U](U)' line is clean markdown and never matches
-    (the rule needs two or more '[' runs before the link)."""
-    for mm in (_R19_PAIR.match(line), _R19_WHOLE.match(line)):
-        if mm and _R19_TAIL_OK.match(mm.group("tail") or ""):
-            out = []
-            label = (mm.groupdict().get("label") or "").strip()
-            if label and re.search(r"[^\[\] \t]", label):
-                out.append(label)
-            out.append(mm.group("u"))
-            return out
-    return [line]
+def _fix_doubled_link_line(line: str) -> str:
+    um = re.search(r"https?://[^\s\[\]\(\)]+", line)
+    if not um:
+        return line
+    url = um.group(0)
+    # A mangle repeats the same URL; a plain link line has it exactly
+    # twice (the '[U](U)' text + target).
+    if line.count(url) < 2:
+        return line
+    head = line[:um.start()]
+    # The URL must sit right after a markdown '[' opener (the feed wraps
+    # the bare URL in a link); repeated bare URLs in prose are untouched.
+    if not re.search(r"\[[ \t]*$", head):
+        return line
+    # Never touch a line whose label part already contains another link.
+    if "](" in head:
+        return line
+    # Mangle evidence: strip every well-formed '[text](url)' link; a
+    # mangle still leaves the URL in garbage tails ('](U](U))') or
+    # unbalanced brackets ('[['). Clean lines are fully explained by
+    # real links + prose.
+    rest = _LINK_OK.sub("", line)
+    if url not in rest and rest.count("[") == rest.count("]"):
+        return line
+    label = re.sub(r"[\[\][ \t]+", " ", head)
+    label = re.sub(r"\s{2,}", " ", label).strip()
+    return (label + " " if label else "") + f"[{url}]({url})"
 
 
 def _repair_label_url_mangle(lines: list) -> list:
-    """Round 19 pre-pass for repair_mangled_link_lines: the 'label line +
-    bare URL' mangle family (post 1whe2tr). A dangling 'Word](U](U)'
-    fragment line is paired with the 'Word) rest ...' continuation line
-    that follows it (across blank lines) and both collapse to
-    'Word rest' + the URL as its own line; an unpaired fragment line is
-    dropped (its word and URL both appear in the pair)."""
-    out = []
-    i = 0
-    n = len(lines)
-    while i < n:
-        line = lines[i].strip()
-        bm = _R19_BFRAG.fullmatch(line)
-        if bm:
-            w = bm.group("w")
-            j = i + 1
-            while j < n and lines[j].strip() == "":
-                j += 1
-            if j < n:
-                cm = _R19_WCONT.match(lines[j].strip())
-                if cm and cm.group("w").lower() == w.lower():
-                    label_rest = f"{w} {cm.group('rest')}".strip()
-                    cm2 = _R19_CLEANLINK.match(label_rest)
-                    if cm2:
-                        out.extend([cm2.group("label"), cm2.group("u")])
-                    else:
-                        out.extend(_r19_split_label_link(label_rest))
-                    i = j + 1
-                    continue
-            # unpaired fragment line: pure feed garbage (word + url tails,
-            # both duplicated in the pair) — drop it
-            i += 1
-            continue
-        out.extend(_r19_split_label_link(line))
-        i += 1
-    return out
+    """Round 20 pre-pass for repair_mangled_link_lines: one plain
+    'label [U](U)' line per mangled link line; clean lines and the
+    round 15/16 shapes pass through byte-identical."""
+    return [_fix_doubled_link_line(line.strip()) for line in lines]
+
+
+# ---------------------------------------------------------------------------
+# ■ ROUND 20 (2026-09-17): ARCHIVE POST LIVENESS GATE
+# The Arctic Shift archive (round 17) keeps posts that are no longer
+# live on reddit: ones the moderators removed ("[ Removed by moderator
+# ]"), ones the author deleted ("[deleted]" / "Sorry, this post was
+# deleted by the person who originally posted it."), and ones still
+# pending approval in a moderator queue (not accepted yet). The archive
+# stores the ORIGINAL content from capture time, so the round-18/19
+# removal-notice filter cannot see the removal. Live sources can: a post
+# that is removed / deleted / not approved yet is invisible to the proxy
+# services (redditez -> vxreddit -> embeddit) and to redlib. So an
+# archive-sourced post is only posted when at least one live source can
+# actually retrieve it; otherwise it is skipped and NOT cached — once it
+# is approved or restored it becomes visible and posts normally on a
+# later run. RSS-sourced posts and TEST POST rebuilds are unaffected.
+# ---------------------------------------------------------------------------
+
+async def verify_archive_post_live(session, path: str, label: str = ""):
+    """Verify an archive-sourced post is still LIVE on reddit.
+    Returns (live: bool, why: str)."""
+    health = _proxy_health or {}
+    proxy_down = (reddit_proxy is None or all(
+        isinstance(health.get(s), dict) and health[s].get("ok") is False
+        for s in ("redditez", "vxreddit", "embeddit")))
+    if reddit_proxy is not None:
+        try:
+            result = await reddit_proxy.fetch_proxy_post(session, path, label=label)
+        except Exception:
+            result = None
+        if result:
+            _reason = removed_post_reason(result.get("title"), result.get("body"))
+            if _reason:
+                return False, (f"live source {result.get('service')} still "
+                               f"shows a removal notice ({_reason})")
+            return True, f"live via {result.get('service')}"
+    # redlib (the "other means"): the post page only exists while the
+    # post is live on reddit.
+    try:
+        base = await fetch_test_post_base(session, path, label)
+    except Exception:
+        base = None
+    if base and (base.get("title") or base.get("body")):
+        return True, "live via redlib"
+    if proxy_down:
+        return False, ("all live sources are down this run — cannot "
+                       "verify; skipped for safety")
+    return False, ("no live source (redditez/vxreddit/embeddit/redlib) "
+                   "can retrieve the post — appears removed, deleted or "
+                   "still pending approval")
 
 
 def repair_mangled_link_lines(lines: list) -> list:
@@ -2400,6 +2443,21 @@ async def main():
                     logging.info(f"[{unique_key}] post appears removed/deleted "
                                  f"({_removed}) — skipping, not cached (will post "
                                  f"once approved).")
+                    continue
+
+            # ---- round 20: liveness gate for archive-sourced posts ----
+            # The Arctic archive can carry posts that are no longer live on
+            # reddit (removed / deleted / still pending approval). Verify a
+            # live source (proxy chain, then redlib) can actually retrieve
+            # the post before posting it; otherwise skip + don't cache.
+            if (not TEST_POST_ID and entry is not None
+                    and isinstance(entry, _ArcticEntry)):
+                _live, _why = await verify_archive_post_live(session, path,
+                                                             label=unique_key)
+                if not _live:
+                    logging.info(f"[{unique_key}] archive post not verified "
+                                 f"live ({_why}) — skipping, not cached (will "
+                                 f"post once approved/restored).")
                     continue
 
             try:

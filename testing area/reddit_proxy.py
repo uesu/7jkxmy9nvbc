@@ -177,84 +177,61 @@ _BLOCK_BOUNDARY_RE = re.compile(r"(?i)</?(?:p|div|li|tr|table|h[1-6]|blockquote|
 
 
 # ---------------------------------------------------------------------------
-# ■ ROUND 19 (2026-09-17): 'LABEL LINE + BARE URL' MANGLE REPAIR
-# The feed's auto-linker can mangle a body made of "label line + bare URL
-# line" pairs (live example: post 1whe2tr — 'Firefly video' /
-# 'https://b23.tv/...' / blank / 'Feixiao video' / ...): it doubles or
-# triples the opening '[' of the URL-labelled link on the label line,
-# glues doubled tail fragments '](U](U))' after the last link, and
-# duplicates the next label's first word as a dangling 'Word](U](U)'
-# line before the 'Word) rest ...' continuation line. This pre-pass
-# (run BEFORE repair_mangled_link_lines) collapses the family back to one
-# label line + one bare URL line per pair; the existing bare-URL rule in
-# _line_stage then makes each URL a clickable line. Lines without the
-# doubled-bracket signature are left byte-identical, so the round 15/16
-# mangle shapes keep their existing repair path.
+# ■ ROUND 20 (2026-09-17): SIMPLE 'PLAIN LINK' MANGLE FIX (post 1whe2tr)
+# Replaces the round 19 rule with the simple fix. The original post is a
+# PLAIN link line ("Firefly video" + a bare URL), so a mangled line — the
+# feed's doubled/nested URL-link garbage, e.g.
+#   Firefly video [[U](U)](U](U))     (the doubled card shape)
+#   Firefly video [U](U](U))          (the feed's plain shape)
+#   or any deeper nesting of the same shape
+# — collapses to ONE clean line with the URL exactly once, as a plain
+# clickable link, exactly like the original post:
+#   Firefly video [U](U)
+# Detection (all must hold): the line's URL appears 2+ times (a mangle
+# repeats it), the URL sits right after a markdown '[' opener, and the
+# line is not fully explained by well-formed '[text](url)' links + prose
+# (a mangle leaves the URL in garbage tails like '](U](U))' or
+# unbalanced brackets). Clean single links, repeated real links, bare-URL
+# lines, prose and every round 15/16 shape are left byte-identical;
+# repair_mangled_link_lines still runs after this pre-pass and keeps
+# handling the multi-line family exactly as before.
 # ---------------------------------------------------------------------------
-_R19_TAIL_OK = re.compile(r"(?:\]\(https?://[^\s\[\]]*\)?[\)\]]*)*$")
-_R19_PAIR = re.compile(
-    r"^(?P<label>.+?)[ \t]*(?:\[[ \t]*)+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)(?P<tail>.*)$")
-_R19_WHOLE = re.compile(
-    r"^(?:\[[ \t]*)+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)(?P<tail>.*)$")
-_R19_BFRAG = re.compile(
-    r"^(?P<w>[^\s\[\]]+)\]\(https?://[^\s\[\]]*\]\(https?://[^\s\[\]]*\)?$")
-_R19_WCONT = re.compile(r"^(?P<w>\S+)\)[ \t]+(?P<rest>.*)$")
-_R19_CLEANLINK = re.compile(
-    r"^(?P<label>.+?)[ \t]+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)$")
+_LINK_OK = re.compile(r"\[[^\[\]]*\]\(https?://[^\s()]*\)")
 
-
-def _r19_split_label_link(line: str) -> list:
-    """'label [[[U](U) <glue-tail>' -> ['label', 'U']; a whole line of
-    doubled brackets + URL-labelled link (+ glue tail) -> ['U']. A
-    single-bracket '[U](U)' line is clean markdown and never matches
-    (the rule needs two or more '[' runs before the link)."""
-    for mm in (_R19_PAIR.match(line), _R19_WHOLE.match(line)):
-        if mm and _R19_TAIL_OK.match(mm.group("tail") or ""):
-            out = []
-            label = (mm.groupdict().get("label") or "").strip()
-            if label and re.search(r"[^\[\] \t]", label):
-                out.append(label)
-            out.append(mm.group("u"))
-            return out
-    return [line]
+def _fix_doubled_link_line(line: str) -> str:
+    um = re.search(r"https?://[^\s\[\]\(\)]+", line)
+    if not um:
+        return line
+    url = um.group(0)
+    # A mangle repeats the same URL; a plain link line has it exactly
+    # twice (the '[U](U)' text + target).
+    if line.count(url) < 2:
+        return line
+    head = line[:um.start()]
+    # The URL must sit right after a markdown '[' opener (the feed wraps
+    # the bare URL in a link); repeated bare URLs in prose are untouched.
+    if not re.search(r"\[[ \t]*$", head):
+        return line
+    # Never touch a line whose label part already contains another link.
+    if "](" in head:
+        return line
+    # Mangle evidence: strip every well-formed '[text](url)' link; a
+    # mangle still leaves the URL in garbage tails ('](U](U))') or
+    # unbalanced brackets ('[['). Clean lines are fully explained by
+    # real links + prose.
+    rest = _LINK_OK.sub("", line)
+    if url not in rest and rest.count("[") == rest.count("]"):
+        return line
+    label = re.sub(r"[\[\][ \t]+", " ", head)
+    label = re.sub(r"\s{2,}", " ", label).strip()
+    return (label + " " if label else "") + f"[{url}]({url})"
 
 
 def _repair_label_url_mangle(lines: list) -> list:
-    """Round 19 pre-pass for repair_mangled_link_lines: the 'label line +
-    bare URL' mangle family (post 1whe2tr). A dangling 'Word](U](U)'
-    fragment line is paired with the 'Word) rest ...' continuation line
-    that follows it (across blank lines) and both collapse to
-    'Word rest' + the URL as its own line; an unpaired fragment line is
-    dropped (its word and URL both appear in the pair)."""
-    out = []
-    i = 0
-    n = len(lines)
-    while i < n:
-        line = lines[i].strip()
-        bm = _R19_BFRAG.fullmatch(line)
-        if bm:
-            w = bm.group("w")
-            j = i + 1
-            while j < n and lines[j].strip() == "":
-                j += 1
-            if j < n:
-                cm = _R19_WCONT.match(lines[j].strip())
-                if cm and cm.group("w").lower() == w.lower():
-                    label_rest = f"{w} {cm.group('rest')}".strip()
-                    cm2 = _R19_CLEANLINK.match(label_rest)
-                    if cm2:
-                        out.extend([cm2.group("label"), cm2.group("u")])
-                    else:
-                        out.extend(_r19_split_label_link(label_rest))
-                    i = j + 1
-                    continue
-            # unpaired fragment line: pure feed garbage (word + url tails,
-            # both duplicated in the pair) — drop it
-            i += 1
-            continue
-        out.extend(_r19_split_label_link(line))
-        i += 1
-    return out
+    """Round 20 pre-pass for repair_mangled_link_lines: one plain
+    'label [U](U)' line per mangled link line; clean lines and the
+    round 15/16 shapes pass through byte-identical."""
+    return [_fix_doubled_link_line(line.strip()) for line in lines]
 
 
 def repair_mangled_link_lines(lines: list) -> list:
