@@ -9,12 +9,17 @@ Purpose (also used by CI as the safety gate for Dependabot PRs):
      Arctic Shift search backup — round 17),
   3. the X V3 tweet-data path still behaves (GIF converter chain,
      vxtwitter normalization, twitterez og-page parsing, fallback-chain
-     order — round 11).
+     order — round 11),
+  4. the round-23 (2026-09-18) Reddit V3 rules hold: media must win the
+     proxy chain, the Arctic media-hint gate skips WITHOUT caching, the
+     removal-notice variants are caught and legit posts are not, and the
+     round-14 miningtcup RSS token is still sent all three ways.
 """
 import os
 import sys
 import json
 import types
+import inspect
 import importlib.util
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -660,9 +665,13 @@ _nv1 = asyncio.run(proxy.fetch_proxy_post(None, "/r/X/comments/abc/", label="t",
 check("r16 need_video: skips media-less service, muxed video wins",
       _nv1 and _nv1["service"] == "vxreddit" and _nv1["media"][0]["kind"] == "video",
       str(_nv1))
+# round 23 (2026-09-18): MEDIA wins the chain. redditez here has the text +
+# stats but no media, so it is only kept as the body/stats fallback and the
+# chain continues — vxreddit (which does have the video) wins.
 _nv2 = asyncio.run(proxy.fetch_proxy_post(None, "/r/X/comments/abc/", label="t", health={}))
-check("r16 need_video off (default): first usable service wins",
-      _nv2 and _nv2["service"] == "redditez", str(_nv2))
+check("r23 need_video off: media wins over the text-only first service",
+      _nv2 and _nv2["service"] == "vxreddit" and _nv2["media"][0]["kind"] == "video",
+      str(_nv2))
 proxy._fetch_vxreddit = _nv_ed
 _nv3 = asyncio.run(proxy.fetch_proxy_post(None, "/r/X/comments/abc/", label="t",
                                           health={}, need_video=True))
@@ -676,6 +685,135 @@ _nv4 = asyncio.run(proxy.fetch_proxy_post(None, "/r/X/comments/abc/", label="t",
 check("r16 need_video: warm-up-dead service still skipped",
       _nv4 and _nv4["service"] == "vxreddit", str(_nv4))
 proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = orig_nv_rr, orig_nv_vx, orig_nv_ed
+
+# ---- round 23 (2026-09-18): media must win the proxy chain ----------------
+# 1wj38fc reproduction: redditez dead -> vxreddit has ONLY the title/stats
+# (og:image tags not rendered yet) -> embeddit, which HAS both photos, wins.
+async def _r23_dead(session, path, label=""):
+    return None
+
+
+async def _r23_text_only(session, path, label=""):
+    return {"service": "vxreddit", "title": "Gallery title", "author": "a",
+            "subreddit": "Sub", "body": "body text",
+            "stats": {"ups": 12, "comments": 3}, "media": []}
+
+
+async def _r23_photos(session, path, label=""):
+    return {"service": "embeddit", "title": "Gallery title", "author": "a",
+            "subreddit": "Sub", "body": "body text", "stats": None,
+            "media": [{"kind": "image", "url": "https://i.redd.it/p1.jpg"},
+                      {"kind": "image", "url": "https://i.redd.it/p2.jpg"}]}
+
+
+orig_r23 = (proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit)
+proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = (
+    _r23_dead, _r23_text_only, _r23_photos)
+_r23a = asyncio.run(proxy.fetch_proxy_post(None, "/r/Sub/comments/1wj38fc/",
+                                           label="t", health={}))
+check("r23 1wj38fc: text-only vxreddit does not stop the chain — embeddit's photos win",
+      _r23a and _r23a["service"] == "embeddit" and len(_r23a["media"]) == 2, str(_r23a))
+
+proxy._fetch_redditez = _r23_photos
+_r23b = asyncio.run(proxy.fetch_proxy_post(None, "/r/Sub/comments/abc/",
+                                           label="t", health={}))
+check("r23 media-first: a service with media still wins immediately",
+      _r23b and _r23b["service"] == "embeddit" and len(_r23b["media"]) == 2, str(_r23b))
+
+proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = (
+    _nv_rr, _r23_text_only, _r23_dead)
+_r23c = asyncio.run(proxy.fetch_proxy_post(None, "/r/Sub/comments/abc/",
+                                           label="t", health={}))
+check("r23 all text-only: the FIRST text-only result is the body/stats fallback",
+      _r23c and _r23c["service"] == "redditez"
+      and _r23c["stats"] == {"ups": 1, "comments": 2}, str(_r23c))
+
+proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = (_r23_dead,) * 3
+_r23d = asyncio.run(proxy.fetch_proxy_post(None, "/r/Sub/comments/abc/",
+                                           label="t", health={}))
+check("r23 all dead: None (caller falls back to the native path)", _r23d is None, str(_r23d))
+
+proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = (
+    _r23_dead, _r23_text_only, _r23_photos)
+_r23e = asyncio.run(proxy.fetch_proxy_post(None, "/r/Sub/comments/abc/", label="t",
+                                           health={"redditez": {"ok": False},
+                                                   "vxreddit": {"ok": False}}))
+check("r23 warm-up-dead services still skipped, media still wins",
+      _r23e and _r23e["service"] == "embeddit", str(_r23e))
+proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = orig_r23
+
+# ---- round 23 (b): 22(b) removal-notice variants --------------------------
+check("r23 title: whole title '[ Removed by moderator ]' is a removal marker",
+      v3.removed_post_reason("[ Removed by moderator ]", "body") == "title marker")
+check("r23 title: bold '**[ Removed by moderator ]**' is a removal marker",
+      v3.removed_post_reason("**[ Removed by moderator ]**", "body") == "title marker")
+check("r23 title: tight '[Removed by moderator]' is a removal marker",
+      v3.removed_post_reason("[Removed by moderator]", "") == "title marker")
+check("r23 title: '[removed]' / '[deleted]' still markers (round 18 baselines)",
+      v3.removed_post_reason("[removed]", "") == "title marker"
+      and v3.removed_post_reason("[deleted]", "") == "title marker")
+check("r23 body: \"removed by Reddit's filters\" is caught",
+      v3.removed_post_reason("Title", "This post was removed by Reddit's filters.")
+      == "removed by moderators/filters")
+check("r23 body: \"removed by Reddit's automated system\" is caught",
+      v3.removed_post_reason("Title", "This post was removed by Reddit's automated system.")
+      == "removed by moderators/filters")
+check("r23 body: \"removed by the moderators\" still caught",
+      v3.removed_post_reason("Title", "This post has been removed by the moderators of r/X.")
+      == "removed by moderators/filters")
+check("r23 body: the full Reddit filter notice is still caught",
+      v3.removed_post_reason("Title", "Sorry, this post was removed by Reddit's filters.")
+      is not None)
+check("r23 legit title mentioning [removed] is NOT caught",
+      v3.removed_post_reason("Why was [removed] in the patch notes?",
+                             "body text") is None)
+check("r23 legit title about moderator tools is NOT caught",
+      v3.removed_post_reason("Removed by moderator tools guide", "body text") is None)
+check("r23 legit body mentioning Reddit is NOT caught",
+      v3.removed_post_reason("Title",
+                             "I love posting on Reddit. Nothing was removed here.")
+      is None)
+
+# ---- round 23 (c): the Arctic media hint is positive-only -----------------
+check("r23 hint: gallery_data", v3._arctic_media_hint({"gallery_data": {"items": []}}) is True)
+check("r23 hint: is_gallery", v3._arctic_media_hint({"is_gallery": True}) is True)
+check("r23 hint: media_metadata", v3._arctic_media_hint({"media_metadata": {"a": {}}}) is True)
+check("r23 hint: post_hint=image", v3._arctic_media_hint({"post_hint": "image"}) is True)
+check("r23 hint: i.redd.it url",
+      v3._arctic_media_hint({"url": "https://i.redd.it/abc.jpg"}) is True)
+check("r23 hint: v.redd.it url", v3._arctic_media_hint({"url": "https://v.redd.it/abc"}) is True)
+check("r23 hint: secure_media_domain",
+      v3._arctic_media_hint({"secure_media_domain": "i.redd.it"}) is True)
+check("r23 hint: plain text post has NO hint",
+      v3._arctic_media_hint({"selftext": "hi"}) is False)
+check("r23 hint: link post has NO hint",
+      v3._arctic_media_hint({"url": "https://example.com/a", "post_hint": "link"}) is False)
+check("r23 hint: None / empty dict are safe",
+      v3._arctic_media_hint(None) is False and v3._arctic_media_hint({}) is False)
+
+# ---- round 23 (d): the main-loop gate — skip, and skip WITHOUT caching ----
+_main_src = inspect.getsource(v3.main)
+_gate = _main_src.split("# ---- round 23 (2026-09-18): Arctic media-hint gate", 1)[-1]
+_gate = _gate.split("if (", 1)[-1].split("posted_ts =", 1)[0]
+for _cond in ("not TEST_POST_ID", "not DRY_RUN", "post_json is None",
+              "isinstance(entry, _ArcticEntry)", "not data[\"media\"]",
+              "_arctic_media_hint(getattr(entry, \"_arctic_post\", None))"):
+    check(f"r23 gate keeps condition: {_cond}", _cond in _gate, _gate)
+check("r23 gate: the skip is a `continue` and caches nothing "
+      "(so the post is retried next run)",
+      _gate.rstrip().endswith("continue") and "posted.add" not in _gate, _gate)
+
+# ---- round 14 (2026-09-18): miningtcup RSS token sent all three ways ------
+for _rel, _label in (("testing area/twitter_v3.py", "X V3"),
+                     ("testing area/twitter_v2_button_outside.py", "X V2")):
+    with open(os.path.join(ROOT, _rel), "r", encoding="utf-8") as _fh:
+        _src = _fh.read()
+    check(f"r14 {_label}: Authorization: Bearer header kept",
+          '"Authorization": f"Bearer {token}"' in _src)
+    check(f"r14 {_label}: token also sent inside the User-Agent",
+          '"User-Agent": f"Mozilla/5.0 {token}"' in _src)
+    check(f"r14 {_label}: ?token= query param kept",
+          "?token={url_quote(token, safe='')}" in _src)
 
 # ---- round 11: X V3 tweet-data fallback chain (twitter_proxy) -------------
 tpx = None
