@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# OPTIONAL: automatically MERGE Dependabot PRs once all checks are green.
+#
+# This is DISABLED by default. To enable it:
+#   Repo -> Settings -> Secrets and variables -> Actions -> Variables
+#   -> New repository variable:  AUTO_MERGE_DEPENDABOT  =  yes
+#
+# Safety gates (ALL must hold before anything merges):
+#   • the PR author is dependabot[bot] (never human PRs)
+#   • the PR is not a draft and mergeable-state is "clean"
+#   • at least one check ran, and every check is success/skipped/neutral
+#     (the CI workflow above is that check: install + compile + smoke test)
+#   • you explicitly enabled it via the repository variable
+#
+# Nothing here touches main unless all gates pass. See docs/DEPENDABOT.md.
+# ---------------------------------------------------------------------------
+name: Dependabot auto-merge (opt-in)
+
+on:
+  pull_request_target:
+    types: [synchronize, ready_for_review, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    # Gate 0: only runs when the variable is set to "yes" (empty = off).
+    if: vars.AUTO_MERGE_DEPENDABOT == 'yes' && github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      # NOTE: no checkout step on purpose — pull_request_target runs with
+      # main-branch secrets, so we never execute PR (untrusted) code.
+      - name: Evaluate + merge if all checks are green
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const number = context.payload.pull_request.number;
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            if (pr.draft) { console.log("Draft PR — skipping."); return; }
+            if (pr.state !== 'open') { console.log("PR not open — skipping."); return; }
+            if (pr.mergeable_state !== 'clean') {
+              console.log(`mergeable_state=${pr.mergeable_state} — skipping.`);
+              return;
+            }
+
+            const { data: checks } = await github.rest.checks.listForRef({ owner, repo, ref: pr.head.sha });
+            if (!checks.check_runs || checks.check_runs.length === 0) {
+              console.log("No checks have run yet — skipping (safety).");
+              return;
+            }
+            const bad = checks.check_runs.filter(
+              c => c.status === 'completed' && !['success', 'skipped', 'neutral'].includes(c.conclusion));
+            const pending = checks.check_runs.filter(c => c.status !== 'completed');
+            if (pending.length) { console.log(`${pending.length} check(s) still running — skipping.`); return; }
+            if (bad.length) {
+              console.log(`Failed check(s): ${bad.map(c => c.name).join(', ')} — NOT merging.`);
+              return;
+            }
+
+            console.log("All checks green on a Dependabot PR — merging.");
+            await github.rest.pulls.merge({
+              owner, repo, pull_number: number, merge_method: 'squash',
+            });

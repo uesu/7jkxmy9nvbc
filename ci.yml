@@ -1,0 +1,37 @@
+name: CI — syntax + offline smoke test
+
+# Safety gate for Dependabot PRs (and any PR): proves the monitor scripts
+# still install and compile after a dependency bump BEFORE anything can be
+# merged to main. Runs on every PR + push to main.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies (a broken requirements.txt fails HERE, not in production)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile every .py file (syntax errors fail here)
+        run: python -m compileall -q main.py "testing area" tests
+
+      - name: Offline smoke test (no network, no secrets needed)
+        run: python tests/test_smoke.py
