@@ -1,8 +1,15 @@
 name: Reddit Feed V3 Monitor
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'   # backup only — GitHub cron is best-effort
+  # ── GITHUB NATIVE SCHEDULE: DISABLED (2026-09-17) ────────────────────────
+  # It raced with the cron-job.org workflow_dispatch triggers: both checked
+  # out the same pre-cache commit, both posted the same post (2026-09-17
+  # WutheringWavesLeaks_1wis2u5 double post), and the 2nd cache push was
+  # rejected (non-fast-forward). cron-job.org is now the SINGLE scheduler for
+  # this monitor. To re-enable GitHub's own schedule, uncomment these two
+  # lines AND pause the cron-job.org job:
+  #   schedule:
+  #     - cron: '*/10 * * * *'
   workflow_dispatch:          # allows manual + external-cron triggering
     inputs:
       test_post:

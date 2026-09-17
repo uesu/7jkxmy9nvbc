@@ -1,9 +1,20 @@
 name: Twitter Feed Monitor
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'   # backup only — GitHub cron is best-effort
+  # ── GITHUB NATIVE SCHEDULE: DISABLED (2026-09-17) ────────────────────────
+  # It raced with the cron-job.org workflow_dispatch triggers: both checked
+  # out the same pre-cache commit, both posted the same tweet, and the 2nd
+  # cache push was rejected (non-fast-forward). cron-job.org is now the
+  # SINGLE scheduler for this monitor. To re-enable GitHub's own schedule,
+  # uncomment these two lines AND pause the cron-job.org job:
+  #   schedule:
+  #     - cron: '*/10 * * * *'
   workflow_dispatch:          # allows manual + external-cron triggering
+    inputs:
+      test_tweet:
+        description: 'Optional TEST TWEET: rebuild ONE specific tweet, e.g. Wuthering_Waves/2100555373073797461 (nitter feed bypassed; same pipeline + cache). Leave empty for a normal run.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -35,6 +46,15 @@ jobs:
           WEBHOOK_WUTHERING_WAVES: ${{ secrets.WEBHOOK_WUTHERING_WAVES }}
           WEBHOOK_HONKAINA: ${{ secrets.WEBHOOK_HONKAINA }}
           WEBHOOK_ANANTA_EN: ${{ secrets.WEBHOOK_ANANTA_EN }}
+          # Test tools (2026-09-17): manual runs only. TEST_TWEET_ID rebuilds
+          # one specific tweet via the direct FxTwitter path (nitter-free).
+          TEST_TWEET_ID: ${{ github.event.inputs.test_tweet }}
+          # Nitter RSS token (2026-09-17): nitter.miningtcup.me is behind a
+          # bot check. When the emailed RSS token arrives, set it as a repo
+          # VARIABLE (Settings -> Secrets and variables -> Actions ->
+          # Variables -> NITTER_RSS_TOKEN) — the next run picks it up, no
+          # code change. Empty = the chain just skips that instance.
+          NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}
         # ───────────────────────────────────────────────────────────────────
         # TESTING AREA (how updates ship):
         # • A new/changed script lives in "testing area/" FIRST (e.g.
