@@ -57,6 +57,19 @@
 #     videos above it auto-downgrade to the largest variant at/below it, or
 #     post a "watch on X" note — the gallery never carries a tile Discord's
 #     proxy can't play ("image not found").
+#   • ROUND 11 (2026-09-17): TWEET-DATA FALLBACK CHAIN (new module
+#     testing area/twitter_proxy.py) — FxTwitter (FxEmbed, primary) ->
+#     fixupx (same engine, stand-by host) -> vxtwitter (BetterTwitFix API,
+#     multi-photo as separate photos) -> twitterez (EmbedEZ bot page, ad
+#     lines stripped). Every result is normalized to the FxTwitter shape,
+#     so cards are identical no matter which service answered; the winner
+#     is logged per tweet (source=...). /en translation only when the data
+#     came from FxTwitter. If the module file is missing, the legacy direct
+#     FxTwitter call below is used — nothing breaks.
+#   • ROUND 11: GIF chain restructured — gif.fxtwitter .webp ->
+#     gifconvert.vxtwitter.com .webp -> .gif (browser-Referer probe) ->
+#     fastgif (offline since 2026-09-17, last probe only). .avif is never
+#     used (Discord's gallery can't render it).
 # ---------------------------------------------------------------------------
 import os
 import re
@@ -73,6 +86,15 @@ from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 load_dotenv()
+
+# ROUND 11: tweet-data fallback chain (fxtwitter -> fixupx -> vxtwitter ->
+# twitterez). Soft import: if the module file is missing, the script logs a
+# warning and keeps using the legacy direct FxTwitter call.
+try:
+    import twitter_proxy
+except Exception as e:  # only when the file is absent from the repo
+    twitter_proxy = None
+    logging.warning(f"twitter_proxy unavailable ({e}) — using direct FxTwitter only.")
 
 ACCOUNTS_STR = os.getenv("ACCOUNTS", "TYPEII_EN,PomPom_HonkaiSR,Wuthering_Waves,HonkaiNA,Ananta_EN")
 ACCOUNTS = [acc.strip() for acc in ACCOUNTS_STR.split(",") if acc.strip()]
@@ -96,7 +118,15 @@ GIF_WEBP_BASE = "https://gif.fxtwitter.com/tweet_video/"
 # ROUND 6: independent third-party converter discovered live (2026-09-12).
 # It turns tweet_video mp4s into REAL GIFs — always request the .gif
 # extension (its .webp route errors). Unknown ids 500, so it is probeable.
+# ROUND 11 (2026-09-17): OFFLINE (404 on every route) — kept as the LAST
+# probe of the GIF chain so it is used automatically again if it returns.
 GIF_RAILWAY_BASE = "https://fastgif-production.up.railway.app/tweet_video/"
+# ROUND 11 (2026-09-17): BetterTwitFix (vxtwitter) converter — the exact
+# URL shape vxtwitter's own embeds use (verified live). They serve .avif,
+# which Discord's gallery can't render, so we probe .webp, then .gif. The
+# endpoint is header-gated (500 to plain clients), so its probes carry a
+# browser Referer (see resolve_gif_image below).
+GIFCONVERT_BASE = "https://gifconvert.vxtwitter.com/convert."
 IS_COMPONENTS_V2 = 1 << 15  # Flag for rich card layout
 
 # ---------------------------------------------------------------------------
@@ -343,10 +373,15 @@ async def probe_video_size(session: aiohttp.ClientSession, url: str,
     return None
 
 
-async def _probe_image_url(session: aiohttp.ClientSession, url: str) -> bool:
-    """HEAD-checks that a URL answers 200 with an image content type."""
+async def _probe_image_url(session: aiohttp.ClientSession, url: str,
+                           referer: str | None = None) -> bool:
+    """HEAD-checks that a URL answers 200 with an image content type.
+    ROUND 11: optional referer for header-gated converters (gifconvert)."""
     try:
-        async with session.head(url, headers=BROWSER_HEADERS, allow_redirects=True,
+        headers = dict(BROWSER_HEADERS)
+        if referer:
+            headers["Referer"] = referer
+        async with session.head(url, headers=headers, allow_redirects=True,
                                 timeout=aiohttp.ClientTimeout(total=8)) as resp:
             content_type = resp.headers.get("Content-Type") or ""
             return resp.status == 200 and content_type.startswith("image/")
@@ -357,20 +392,24 @@ async def _probe_image_url(session: aiohttp.ClientSession, url: str) -> bool:
 async def resolve_gif_image(session: aiohttp.ClientSession,
                             video_url: str) -> tuple[str | None, str]:
     """
-    X GIFs ship as tweet_video/*.mp4. Two community converters re-encode them
+    X GIFs ship as tweet_video/*.mp4. Community converters re-encode them
     into REAL animated images that Discord renders inline (better than an mp4
-    player for tiny loops). They are probed in order — never forced:
+    player for tiny loops). Probed in order — never forced (round 11):
 
       1. gif.fxtwitter.com/tweet_video/<id>.webp — the official FxTwitter
          asset that V1 embeds use. Verified INTERMITTENTLY DOWN (Cloudflare
          530/1033), so it's only used when the probe succeeds.
-      2. fastgif-production.up.railway.app/tweet_video/<id>.gif — independent
-         third-party converter (round 6). Only its .gif route works (its
-         .webp route 500s), and unknown ids 500, which makes it probeable.
+      2. gifconvert.vxtwitter.com/convert.webp?url=<mp4> — BetterTwitFix's
+         converter (round 11; the exact URL shape vxtwitter's own embeds
+         use). Header-gated: probed with a browser Referer.
+      3. gifconvert.vxtwitter.com/convert.gif?url=<mp4>
+      4. fastgif-production.up.railway.app/tweet_video/<id>.gif — independent
+         third-party converter (round 6; OFFLINE since 2026-09-17 — last
+         probe only, auto-revives if it returns).
 
-    Returns (url, source) with source "gif.fxtwitter" | "fastgif", or
-    (None, "") when neither answers — caller then keeps the mp4 (it still
-    plays, just as a video).
+    Returns (url, source) with source "gif.fxtwitter" | "gifconvert" |
+    "fastgif", or (None, "") when nothing answers — caller then keeps the
+    mp4 (it still plays, just as a video).
     """
     match = re.search(r"tweet_video/([^./]+)\.mp4", video_url)
     if not match:
@@ -379,6 +418,12 @@ async def resolve_gif_image(session: aiohttp.ClientSession,
     webp_url = GIF_WEBP_BASE + key + ".webp"
     if await _probe_image_url(session, webp_url):
         return webp_url, "gif.fxtwitter"
+    vc_webp = GIFCONVERT_BASE + "webp?url=" + url_quote(video_url, safe="")
+    if await _probe_image_url(session, vc_webp, referer="https://vxtwitter.com"):
+        return vc_webp, "gifconvert"
+    vc_gif = GIFCONVERT_BASE + "gif?url=" + url_quote(video_url, safe="")
+    if await _probe_image_url(session, vc_gif, referer="https://vxtwitter.com"):
+        return vc_gif, "gifconvert"
     gif_url = GIF_RAILWAY_BASE + key + ".gif"
     if await _probe_image_url(session, gif_url):
         return gif_url, "fastgif"
@@ -680,6 +725,10 @@ async def fetch_tweet_details(session: aiohttp.ClientSession, account: str, twee
     reposts of other authors' tweets, X Articles, and some newer tweets —
     verified live — while the plain-ID path resolves all of them. The true
     author is read from the payload afterwards. lang_suffix: '/en' etc.
+
+    ROUND 11: normally the round-11 fallback chain
+    (twitter_proxy.fetch_tweet_details_any) is used instead; this legacy
+    direct call is the path taken when twitter_proxy.py is missing.
     """
     url = f"{FXTWITTER_API_BASE}/status/{tweet_id}{lang_suffix}"
     headers = {"User-Agent": "NewsFlashBot/3.0"}
@@ -821,7 +870,17 @@ async def main():
                 published_parsed = entry.get("published_parsed")
                 rss_ts = time.mktime(published_parsed) if published_parsed else now
 
-                tweet_data = await fetch_tweet_details(session, account, tweet_id)
+                # ROUND 11: 4-step tweet-data fallback chain — every result
+                # is normalized to the FxTwitter shape, so the card pipeline
+                # below is unchanged no matter which service answered
+                # (winner is logged: source=...).
+                if twitter_proxy is not None:
+                    tweet_data, tweet_source = await twitter_proxy.fetch_tweet_details_any(
+                        session, account, tweet_id, label=unique_key)
+                else:
+                    # legacy direct FxTwitter call (module file missing)
+                    tweet_data = await fetch_tweet_details(session, account, tweet_id)
+                    tweet_source = "fxtwitter"
                 if not tweet_data:
                     continue
 
@@ -842,7 +901,10 @@ async def main():
                 # --- auto-translation for non-English tweets ---
                 # (articles: FxTwitter doesn't translate article bodies -> skip /en)
                 lang = (tweet_data.get("lang") or "").lower()
-                if lang and lang != "en" and not is_article:
+                # ROUND 11: /en is a FxTwitter feature — attempted only when
+                # the data really came from FxTwitter (backup services in the
+                # chain don't offer the /en endpoint).
+                if lang and lang != "en" and not is_article and tweet_source == "fxtwitter":
                     translated_data = await fetch_tweet_details(session, account, tweet_id,
                                                                 lang_suffix="/en")
                     if translated_data and translated_data.get("translation"):
@@ -918,7 +980,7 @@ async def main():
                 async with session.post(target_url, json=payload) as resp:
                     if resp.status in (200, 204):
                         posted_urls.add(unique_key)
-                        logging.info(f"V3 Posted: {unique_key} (lang={lang or 'en'}{' | article' if is_article else ''})")
+                        logging.info(f"V3 Posted: {unique_key} (lang={lang or 'en'}{' | article' if is_article else ''} | source={tweet_source})")
                         await asyncio.sleep(1.5)
                     else:
                         body = await resp.text()

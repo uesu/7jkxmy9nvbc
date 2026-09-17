@@ -114,6 +114,13 @@
 #       containing ONLY the YouTube link (Discord's official preview) after
 #       the card lands — waits for the first post (YOUTUBE_LINK_MESSAGE=0
 #       disables; the card's own thumb + button stay).
+#   14. (round 17, 2026-09-17) ARCTIC SHIFT SEARCH BACKUP: subreddits that
+#       RSS left empty (missing from the combined feed, dead per-sub feeds,
+#       quiet subs) are re-checked against the archive's /api/posts/search —
+#       same post shape as the crosspost lookup. Archive posts are wrapped
+#       as feedparser-style entries and run through the SAME collect()
+#       (dedup + 48h window unchanged); soft-fail on any error; shares the
+#       3-strike circuit breaker with the crosspost archive lookup.
 #
 # ■ WORKFLOW: identical to V1/V2. Test-area first:
 #   run: python "testing area/reddit_main_v3.py"
@@ -459,6 +466,85 @@ def arctic_gallery_items(post) -> list:
                 url = f"https://i.redd.it/{_reddit_media_key(match.group(1))}"
         out.append({"kind": "gif" if animated else "image", "url": url})
     return out
+
+
+# ---------------------------------------------------------------------------
+# ■ ROUND 17 (2026-09-17): ARCTIC SHIFT SEARCH BACKUP
+# When RSS yields NO new posts for a subreddit, re-check the Arctic Shift
+# archive's /api/posts/search (same post JSON shape as the /api/posts/ids
+# lookup above). Archive posts are wrapped as feedparser-style entries and
+# run through the SAME collect() in main() — dedup cache + 48h freshness
+# window apply unchanged. Soft-fail on any error; shares the 3-strike
+# _arctic_fail_count circuit breaker with the crosspost archive lookup.
+# Arctic's score/num_comments are stale for ~36h after posting, so they are
+# NEVER read here (stats come from the post JSON / proxy services instead).
+# ---------------------------------------------------------------------------
+ARCTIC_SEARCH_URL = "https://arctic-shift.photon-reddit.com/api/posts/search"
+
+
+async def fetch_arctic_subreddit_posts(session, subreddit: str,
+                                       after_epoch: float | None = None,
+                                       limit: int = 100, label: str = "") -> list:
+    """Newest posts for one subreddit from the Arctic Shift search API.
+
+    Returns [] on ANY failure (429/timeout/bad shape) — the RSS path has
+    already run, so a search error must never block posting. `after_epoch`
+    (unix seconds) restricts the window to match MAX_AGE_SECONDS.
+    """
+    global _arctic_fail_count
+    if not re.fullmatch(r"[A-Za-z0-9_]{2,50}", subreddit or "") or _arctic_fail_count >= 3:
+        return []
+    params = {"subreddit": subreddit, "limit": str(min(int(limit), 100)),
+              "sort": "desc", "md2html": "true"}
+    if after_epoch:
+        params["after"] = str(int(after_epoch))
+    try:
+        async with session.get(ARCTIC_SEARCH_URL, params=params,
+                               headers=dict(BROWSER_HEADERS),
+                               timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                raise ValueError(f"HTTP {resp.status}")
+            data = await resp.json(content_type=None)
+        posts = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(posts, list):
+            raise ValueError("invalid search response")
+        _arctic_fail_count = 0
+        return [p for p in posts if isinstance(p, dict) and p.get("id")]
+    except Exception as exc:
+        _arctic_fail_count += 1
+        logging.info(f"[{label or subreddit}] Arctic Shift search unavailable: {exc}")
+        return []
+
+
+class _ArcticEntry:
+    """Minimal feedparser-style entry wrapping an Arctic Shift post, so
+    archive posts flow through the SAME collect() as RSS entries (dedup
+    cache + 48h freshness window apply unchanged). entry_to_base_data()
+    reads title/author/link as attributes and content/summary/
+    media_thumbnail via .get() — exactly like a feedparser entry."""
+
+    def __init__(self, post: dict):
+        pid = post.get("id") or ""
+        sub = post.get("subreddit") or ""
+        self.link = f"https://www.reddit.com/r/{sub}/comments/{pid}/"
+        self.title = post.get("title") or ""
+        self.author = post.get("author") or ""
+        created = post.get("created_utc")
+        updated = post.get("updated_utc") or created
+        self.published_parsed = (time.localtime(created)
+                                 if isinstance(created, (int, float)) and created > 0 else None)
+        self.updated_parsed = (time.localtime(updated)
+                               if isinstance(updated, (int, float)) and updated > 0 else None)
+        self._d = {
+            "content": [{"value": post.get("body") or ""}],
+            "summary": "",
+            "media_thumbnail": [],
+            "published_parsed": self.published_parsed,
+            "updated_parsed": self.updated_parsed,
+        }
+
+    def get(self, k, d=None):
+        return self._d.get(k, d)
 
 
 def _clean_author_name(value) -> str:
@@ -2040,6 +2126,34 @@ async def main():
                         continue
                     entries = [feed.entries[0]] if is_first_run else feed.entries
                     collect(entries, subreddit)
+
+            # ---- round 17: Arctic Shift search backup ---------------------
+            # Subreddits RSS left EMPTY (missing from the combined 100-entry
+            # feed, dead/bot-walled per-sub feeds, quiet subs) are re-checked
+            # against the Arctic Shift archive search. Archive posts are
+            # wrapped as feedparser-style entries and run through the SAME
+            # collect() above — dedup cache + 48h freshness window apply
+            # unchanged; crossposts found in the archive get the original
+            # post's media via the existing native crosspost path. Soft-fail:
+            # any search error just leaves that sub at zero.
+            covered_subs = {p[0] for p in new_posts}
+            for sub in SUBREDDITS:
+                if sub in covered_subs:
+                    continue
+                try:
+                    arc_posts = await fetch_arctic_subreddit_posts(
+                        session, sub, after_epoch=now - MAX_AGE_SECONDS,
+                        label=sub)
+                except Exception:
+                    arc_posts = []
+                if not arc_posts:
+                    continue
+                logging.info(f"[arctic {sub}] RSS had no new posts — trying "
+                             f"{len(arc_posts)} post(s) from the archive.")
+                arc_entries = [_ArcticEntry(p) for p in arc_posts]
+                if is_first_run:
+                    arc_entries = arc_entries[:1]  # anti-flood (same as RSS)
+                collect(arc_entries, sub)
 
         total_found = len(new_posts)
         if total_found == 0:
