@@ -229,19 +229,57 @@ def _fix_doubled_link_line(line: str) -> str:
     return (label + " " if label else "") + url
 
 
+# ---------------------------------------------------------------------------
+# ■ ROUND 22 (2026-09-17): CLEAN AUTO-LINKED 'PLAIN LINK' FACE (1whe2tr)
+# The round-20/21 fix covers the feed's MANGLED faces and the raw
+# 'label / bare URL' pairs, but the same post can also arrive from a
+# source that AUTO-LINKS the post's bare URLs (the post-page rendering):
+# the original line 'Firefly video https://b23.tv/…' becomes the CLEAN
+# markdown 'Firefly video [https://b23.tv/…](https://b23.tv/…)'. Clean
+# links are otherwise intentionally left untouched (rounds 15/20/21) —
+# but the components-v2 card renders the body as PLAIN TEXT, so a link
+# whose text IS its own URL shows its literal brackets:
+#   'Firefly video [https://b23.tv/…](https://b23.tv/…)'
+# Round 22 collapses such URL-labelled links to the bare URL —
+#   'Firefly video https://b23.tv/…'
+# — exactly the original line (Discord auto-links it in the container).
+# Scope guards: a line with mangle residue (a leftover URL or unbalanced
+# brackets after stripping well-formed links) is left byte-identical for
+# the round-20/21 repairers; descriptive links ('[text](U)' with text
+# different from U) are untouched; prose is untouched.
+# ---------------------------------------------------------------------------
+_URL_LABELLED = re.compile(r"\[(https?://[^\s\[\]]+)\]\(\1\)")
+
+def _unwrap_url_labelled_links(line: str) -> str:
+    """Round 22: on a CLEAN line (no mangle residue), turn every
+    URL-labelled markdown link '[U](U)' into the bare URL 'U'. Lines
+    with mangle residue or only descriptive links pass through
+    byte-identical."""
+    if not _URL_LABELLED.search(line):
+        return line
+    rest = _LINK_OK.sub("", line)
+    if re.search(r"https?://", rest) or rest.count("[") != rest.count("]"):
+        return line
+    return _URL_LABELLED.sub(r"\1", line)
+
+
 def _repair_label_url_mangle(lines: list) -> list:
-    """Round 20/21 pre-pass for repair_mangled_link_lines:
+    """Round 20/21/22 pre-pass for repair_mangled_link_lines:
       * a mangled link line collapses to one plain 'label + bare URL'
         line (round 20);
       * a bare URL line under a plain label line (the original post's
         "label / URL" pair, at most one blank line between) becomes ONE
-        plain 'label URL' line (round 21).
-    Clean lines and the round 15/16 shapes pass through byte-identical;
-    repair_mangled_link_lines still runs afterwards and keeps handling
-    the multi-line family exactly as before."""
+        plain 'label URL' line (round 21);
+      * a CLEAN URL-labelled link '[U](U)' (a source auto-linking the
+        post's bare URL) becomes the bare URL (round 22).
+    Clean lines and the round 15/16 shapes pass through byte-identical
+    (descriptive links stay markdown); repair_mangled_link_lines still
+    runs afterwards and keeps handling the multi-line family exactly as
+    before."""
     out = []
     for raw in lines:
         line = _fix_doubled_link_line(raw.strip())
+        line = _unwrap_url_labelled_links(line)
         if re.fullmatch(r"https?://[^\s\[\]]+", line) and out:
             if out[-1] and not re.search(r"https?://", out[-1]):
                 out[-1] = out[-1] + " " + line
@@ -263,13 +301,15 @@ def repair_mangled_link_lines(lines: list) -> list:
     post's own blank line, and a continuation 'Word) rest [U' or
     'Word) rest [[U](U)' (the feed re-glues an extra '[' before the
     link; the final line also gets a '](u)](u))' tail glued on).
-    Repairs:
+    Repairs (round 22: the repaired link becomes the BARE URL, raw —
+    the components-v2 card renders the body as plain text, so a
+    markdown link would show its literal brackets):
       * tail + continuation (at most one blank line between) ->
-        'Word rest [U](U)'; the url is the continuation's own link when
+        'Word rest U'; the url is the continuation's own link when
         complete, else the next tail's url, else the opener's;
       * leftover '[[U](U)' -> '[U](U)';
       * an orphan continuation 'Word) rest [U](U)' whose tail was dropped
-        keeps the word: 'Word rest [U](U)';
+        keeps the word: 'Word rest U';
       * a pure tail line with no continuation is left for the junk filter.
     """
     tail_re = re.compile(r"([^\s\[\]]+)\]\(https?://[^\s]*?\)?")
@@ -284,7 +324,8 @@ def repair_mangled_link_lines(lines: list) -> list:
         if m:
             before = rest[:m.start()].strip()
             after = rest[m.end():].strip()
-            text = f"[{m.group(1)}]({m.group(2)})"
+            # round 22: the bare URL (the link's target), raw
+            text = m.group(2)
             if before:
                 text = before + " " + text
             if after and not glue_re.fullmatch(after):
@@ -297,7 +338,8 @@ def repair_mangled_link_lines(lines: list) -> list:
                 nm = tail_re.fullmatch(nxt)
                 if nm:
                     close = re.sub(r"\].*$", "", nm.group(0)[len(nm.group(1)) + 2:]).rstrip(")")
-            text = f"[{um.group(1)}]({close or um.group(1)})"
+            # round 22: the bare URL (the tail's target when it knows one)
+            text = close or um.group(1)
             before = rest[:um.start()].strip()
             if before:
                 text = before + " " + text
