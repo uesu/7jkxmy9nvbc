@@ -105,12 +105,48 @@ CACHE_FILE = "posted_tweets.json"
 MAX_CACHE_SIZE = 500
 MAX_AGE_SECONDS = 3 * 3600
 
+# round 12 (2026-09-17): nitter fleet refreshed from the status.d420.de
+# tracker (2026-09-17) + live plain-RSS probes. The tracker's health/RSS
+# flags flip back and forth, so the WHOLE tracked fleet is listed — order is
+# today's evidence (verified-fresh first, known-dead last); the chain stops
+# at the first instance that answers with real entries.
+#   jaydenha.uk        verified fresh via plain RSS probe (2026-09-17) -> FIRST
+#   meowing.monster    verified fresh via plain RSS probe (2026-09-17)
+#   click / xitter.cc  RSS "disabled" at probe time — kept: the tracker's RSS
+#                      flags flip back and forth
+#   miningtcup.me      healthy, RSS ok BUT behind a bot check — needs the
+#                      emailed RSS token (see RSS_TOKEN_ENV); without a valid
+#                      token the chain logs the challenge and moves on
+#   netbub             unreachable at probe time (flags flip back)
+#   thepixora          alive but behind a dog-captcha bot check (2026-09-17)
+#   perennialte.ch     serves a STALE RSS (site works in browsers)
+#   privacydev.net / nitter.net  500'd on 2026-09-17
+#   xcancel.com        suspended 2026-09-14 — kept: auto-revives in the chain
+#                      if it returns
 RSS_INSTANCES = [
+    "https://nitter.jaydenha.uk",
+    "https://nitter.meowing.monster",
+    "https://nitter.click",
+    "https://nitter.xitter.cc",
+    "https://nitter.miningtcup.me",
+    "https://nitter.netbub.com",
+    "https://shitter.thepixora.com",
     "https://nitter.perennialte.ch",
     "https://nitter.privacydev.net",
     "https://nitter.net",
     "https://xcancel.com",
 ]
+
+# round 12 (2026-09-17): token-gated instances. nitter.miningtcup.me hides
+# its RSS behind a bot check; the operator emails out RSS tokens (request
+# sent to nitter-rss@miningtcup.me). When the token arrives, set it as the
+# repo VARIABLE NITTER_RSS_TOKEN (Settings -> Secrets and variables ->
+# Actions -> Variables) — the next run picks it up (read at call time, no
+# code change). The token is sent BOTH ways: Authorization: Bearer header
+# and ?token= query param, so either convention works.
+RSS_TOKEN_ENV = {
+    "https://nitter.miningtcup.me": "NITTER_RSS_TOKEN",
+}
 
 FXTWITTER_API_BASE = "https://api.fxtwitter.com"
 FXTWITTER_VIDEO_PROXY = "https://api.fxtwitter.com/2/go?url="
@@ -700,20 +736,85 @@ def build_quote_components(quote: dict, q_gallery: list, q_notes: list) -> list:
     return components
 
 
+def parse_test_tweet_id(value: str) -> tuple:
+    """round 12 (2026-09-17): TEST_TWEET_ID recovery helper.
+
+    Accepts 'screen_name/tweet_id' or a full x.com/twitter.com status URL
+    and returns (screen_name, tweet_id), or (None, None) when unparseable.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None, None
+    if "status/" in value:
+        match = re.search(r"status/(\d+)", value)
+        if not match:
+            return None, None
+        tweet_id = match.group(1)
+        before = value.split("/status/", 1)[0].rstrip("/")
+        account = before.rsplit("/", 1)[-1]
+        return (account or None), tweet_id
+    # bare screen_name/tweet_id form
+    account, _, tweet_id = value.partition("/")
+    account, tweet_id = account.strip(), tweet_id.strip()
+    if account and re.fullmatch(r"\d+", tweet_id):
+        return account, tweet_id
+    return None, None
+
+
+class _TestFeedEntry:
+    """A feedparser-shaped entry for ONE specific tweet (test-tweet mode)."""
+
+    def __init__(self, link):
+        self.link = link
+
+    def get(self, key, default=None):
+        return default
+
+
+class _TestFeed:
+    """A feedparser-shaped feed with a single (test) entry."""
+
+    def __init__(self, entries):
+        self.entries = entries
+
+
 async def fetch_working_feed(session: aiohttp.ClientSession, account: str):
+    # round 12 (2026-09-17): every attempt is logged. Before this, a dead
+    # nitter fleet made the whole monitor a silent no-op (zero log lines —
+    # the missed 2026-09-17 Wuthering_Waves/2100555373073797461 tweet).
     headers = {"User-Agent": "Mozilla/5.0"}
     for instance in RSS_INSTANCES:
         feed_url = f"{instance}/{account}/rss"
+        req_headers = headers
+        token_env = RSS_TOKEN_ENV.get(instance)
+        token = os.getenv(token_env, "").strip() if token_env else ""
+        if token:
+            # Token-gated instance (bot check): send the RSS token both as a
+            # Bearer header and a ?token= query param — a wrong/missing
+            # token just gets a challenge/403 answer, which is logged below
+            # and the chain moves on.
+            req_headers = {**headers, "Authorization": f"Bearer {token}"}
+            feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
         try:
-            async with session.get(feed_url, headers=headers,
+            async with session.get(feed_url, headers=req_headers,
                                    timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     content = await response.text()
                     feed = await asyncio.to_thread(feedparser.parse, content)
                     if feed.entries:
+                        logging.info(f"[{account}] feed OK via {instance} — "
+                                     f"{len(feed.entries)} entries.")
                         return feed
-        except Exception:
-            continue
+                    logging.info(f"[{account}] {instance}: HTTP 200 but 0 entries "
+                                 f"(bot check / stale instance?) — trying next.")
+                else:
+                    logging.info(f"[{account}] {instance}: HTTP {response.status} — "
+                                 f"trying next.")
+        except Exception as e:
+            logging.info(f"[{account}] {instance}: {type(e).__name__}: {e} — "
+                         f"trying next.")
+    logging.warning(f"[{account}] NO working nitter instance this run — "
+                    f"account skipped (see TEST_TWEET_ID to rebuild one tweet).")
     return None
 
 
@@ -851,11 +952,44 @@ async def main():
         feeds_tasks = [fetch_working_feed(session, acc) for acc in ACCOUNTS]
         feeds = await asyncio.gather(*feeds_tasks)
 
-        for account, feed in zip(ACCOUNTS, feeds):
+        feed_pairs = list(zip(ACCOUNTS, feeds))
+
+        # round 12 (2026-09-17): TEST_TWEET_ID — rebuild ONE specific tweet
+        # WITHOUT the nitter feed (the nitter fleet was down/stale on
+        # 2026-09-17 and the monitor silently no-oped — see
+        # Wuthering_Waves/2100555373073797461). Format: screen_name/tweet_id
+        # (a full x.com status URL also works). It flows through the SAME
+        # pipeline below (data fallback chain, media, card, webhook) and the
+        # SAME cache — an already-posted tweet is skipped by the check further
+        # down, so it is safe to run even if a normal run posts it meanwhile.
+        test_tweet_id = os.getenv("TEST_TWEET_ID", "").strip()
+        if test_tweet_id:
+            t_account, t_id = parse_test_tweet_id(test_tweet_id)
+            if not t_account or not t_id:
+                logging.error(f"TEST_TWEET_ID malformed ({test_tweet_id!r}) — "
+                              f"expected screen_name/tweet_id or a full status "
+                              f"URL — ignored.")
+            else:
+                feed_pairs.append((t_account, _TestFeed([_TestFeedEntry(
+                    f"https://x.com/{t_account}/status/{t_id}")])))
+                logging.info(f"TEST TWEET: {t_account}/{t_id} — nitter feed "
+                             f"bypassed for this one tweet.")
+
+        if not any(feed and feed.entries for _, feed in feed_pairs):
+            logging.error("ALL FEEDS FAILED this run — no nitter instance "
+                          "answered for ANY account (per-instance lines "
+                          "above). Nothing to check — use TEST_TWEET_ID to "
+                          "rebuild a specific tweet.")
+
+        for account, feed in feed_pairs:
             if not feed or not feed.entries:
+                logging.info(f"[{account}] skipping — no feed / 0 entries.")
                 continue
             webhook_url = get_webhook_for_account(account)
             if not webhook_url:
+                logging.warning(f"[{account}] skipping — no webhook configured "
+                                f"(set WEBHOOK_{re.sub(r'[^A-Za-z0-9]', '_', account).upper()}"
+                                f" or DISCORD_WEBHOOK_URL).")
                 continue
             entries = [feed.entries[0]] if is_first_run else feed.entries
             for entry in entries:
