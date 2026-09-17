@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective date:** September 15, 2026 (updated for Reddit V3 round 12)
+**Effective date:** September 15, 2026 (updated for Reddit V3 round 12; updated September 17, 2026 for the X V3 tweet-data fallback chain and the Arctic Shift search backup)
 **Applies to:** the *News Feed Embed* / *Citlali News* X (Twitter) + Reddit → Discord monitor
 ("the Service"), an open-source, self-hosted automation tool.
 
@@ -54,11 +54,14 @@ public URL being looked up):
 | **Discord (webhooks)** | Delivers the generated messages | https://discord.com/privacy |
 | **Nitter mirrors** | Public RSS feeds for X/Twitter | per-instance |
 | **Redlib** | Reddit RSS fallback mirrors, and (Reddit V3) best-effort **post-page** fetches for multi-photo galleries and on-demand test posts — same instances as the RSS fallback, probed in parallel; all current instances sit behind anti-bot challenges (verified 2026-09-13), so requests typically fail fast and transfer no content | per-instance |
-| **FxTwitter / FxEmbed API** | Tweet metadata, media, translation | https://fxtwitter.com |
+| **FxTwitter / FxEmbed API** (incl. sister host **api.fixupx.com**) | **Primary** tweet metadata, media, translation; if the primary host can't answer, the same-engine fixupx host is tried (round 11) | https://fxtwitter.com |
 | **video.twimg.com / x.com (X CDN & post pages)** | HTTP HEAD probes of public video file sizes (X V2/V3 "smart video" check) and OpenGraph image lookups on public post pages — only meta tags are read, no content is downloaded | https://x.com |
-| **gif.fxtwitter.com** | One HEAD probe per X GIF to check the animated WebP rendition exists before using it | https://fxtwitter.com |
-| **fastgif-production.up.railway.app** | Only when the above probe fails: one HEAD probe per X GIF to check the converted animated GIF exists; if it answers, Discord fetches that converted GIF when rendering the post. Independent third-party service, unaffiliated with this project or FxTwitter | https://railway.app |
-| **EmbedEZ API** (Reddit V2 only) | Reddit post metadata, media | https://embedez.com |
+| **gif.fxtwitter.com** | 1st of the GIF converter chain (round 11): one HEAD probe per X GIF to check the animated WebP rendition exists before using it | https://fxtwitter.com |
+| **api.vxtwitter.com** (BetterTwitFix) | 3rd fallback for tweet metadata/media (round 11) — public tweet data only; its direct `video.twimg.com` media URLs are what the bot then probes | https://vxtwitter.com |
+| **gifconvert.vxtwitter.com** | 2nd/3rd of the GIF converter chain (round 11): one HEAD probe per X GIF (`.webp`, then `.gif`, with a browser Referer) to check a converted animated rendition exists before Discord uses it | https://vxtwitter.com |
+| **fastgif-production.up.railway.app** | Last probe of the GIF chain (round 11; offline since 2026-09-17 — retained so it is used automatically again if it returns): one HEAD probe per X GIF to check the converted animated GIF exists; if it answers, Discord fetches that converted GIF when rendering the post. Independent third-party service, unaffiliated with this project or FxTwitter | https://railway.app |
+| **EmbedEZ API** | Reddit V2: Reddit post metadata, media. X V3 (round 11, **last-resort only**): tweet metadata via the keyless search API + one bot-page og: tag read per tweet when fxtwitter/fixupx/vxtwitter all fail; the media URLs are then fetched by **Discord's servers** (animated WebP for GIFs), and any embedded promo/ad line is stripped before posting | https://embedez.com |
+| **Arctic Shift** (arctic-shift.photon-reddit.com) | Reddit V3 archive: post-lookup JSON for crosspost originals, and — only for subreddits that returned no new RSS posts — one `/api/posts/search` per missing subreddit (public post data only, 48-hour window); soft-fails back to the RSS path on any error | https://arctic-shift.photon-reddit.com |
 | **redditez.com** (Reddit V1 default mirror) | No direct contact: the Service only *constructs* the mirror link from the public post path; **Discord's servers** fetch that URL to render the unfurled embed | https://www.redditez.com |
 | **embeddit.deltandy.me / vxreddit.com** (only if you switch `REDDIT_MIRROR`) | Same as above — link construction only; Discord fetches the mirror when rendering. Both are independent community projects, unaffiliated with this project | https://embeddit.deltandy.me |
 | **reddit.com** | Public subreddit RSS — all tracked subreddits in **one combined feed request per run** (`/r/a+b+c/new.rss?limit=100`), optionally carrying your personal feed token (sent only to reddit.com); plus per-post `.json` lookups in Reddit V3 (OAuth app token, or the feed token as a best-effort workaround) — public post data + public top-level comments only | https://www.reddit.com/policies/privacy-policy |

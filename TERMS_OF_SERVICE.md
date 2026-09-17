@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Effective date:** September 11, 2026 (updated September 15, 2026 for Reddit V3 round 12)
+**Effective date:** September 11, 2026 (updated September 15, 2026 for Reddit V3 round 12; updated September 17, 2026 for the X V3 tweet-data fallback chain and the Arctic Shift search backup)
 **Applies to:** the *News Feed Embed* / *Citlali News* X (Twitter) + Reddit → Discord monitor
 ("the Service"), an open-source, self-hosted automation tool.
 
@@ -35,9 +35,14 @@ You agree NOT to use the Service to:
 
 ## 4. Third-Party Dependencies
 
-The Service depends on free/community-run third parties — Nitter mirrors, Redlib, FxTwitter/FxEmbed,
-the independent "fastgif" GIF converter (fastgif-production.up.railway.app, used only as a
-probe-verified fallback when FxTwitter's GIF CDN is down), EmbedEZ, the redditez.com /
+The Service depends on free/community-run third parties — Nitter mirrors, Redlib, FxTwitter/FxEmbed
+(primary tweet-data source, with its same-engine sister client fixupx.com as a stand-by), vxtwitter
+(BetterTwitFix — backup tweet-data API and its gifconvert.vxtwitter.com GIF converter), Arctic Shift
+(arctic-shift.photon-reddit.com — Reddit archive: crosspost originals and, since round 17, a
+per-subreddit search backup feed), the independent "fastgif" GIF converter
+(fastgif-production.up.railway.app, used only as a probe-verified last-resort fallback — offline as
+of 2026-09-17), EmbedEZ (Reddit V2, redditez.com, and — since round 11 — last-resort tweet data via
+twitterez.com), the redditez.com /
 Embeddit (embeddit.deltandy.me) / vxReddit (vxreddit.com) Reddit-embed mirrors (V1 switchable),
 reddit.com RSS and Reddit's own media CDNs (i.redd.it / preview.redd.it / v.redd.it), the
 proxy.embedez.com / vxreddit.com video-muxing fallbacks (Reddit V3, used only when Reddit's own

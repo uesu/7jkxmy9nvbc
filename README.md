@@ -18,12 +18,13 @@ please support them:
 |---|---|---|
 | **News-Flash-Bot** by [@cold-logic5](https://github.com/cold-logic5) | The original repository this project is based on (RSS → Discord webhook architecture) | [GitHub repo](https://github.com/cold-logic5/News-Flash-Bot) · [Author](https://github.com/cold-logic5) |
 | **Nitter** by [@zedeus](https://github.com/zedeus) | Free & open-source, privacy-focused X/Twitter front-end providing the RSS feeds | [GitHub](https://github.com/zedeus/nitter) · [nitter.net](https://nitter.net/) · [nitter.perennialte.ch](https://nitter.perennialte.ch/) · [xcancel.com](https://xcancel.com/) · 💖 [Donations](https://github.com/zedeus/nitter#donations) |
-| **FxTwitter / FxEmbed** by [@dangered wolf](https://github.com/dangeredwolf) | Rich X/Twitter embeds (auto-unfurl) + the free API used for media, stats, translation, GIF re-rendering and the video proxy | [fxtwitter.com](https://fxtwitter.com) · [FxEmbed Docs](https://docs.fxembed.com/) · [GitHub](https://github.com/dangeredwolf) · 💖 [Sponsor dangered wolf](https://github.com/sponsors/dangeredwolf) |
-| **EmbedEZ** | Rich Reddit embeds (redditez.com mirror) + the provider API used by Reddit V2 | [embedez.com](https://embedez.com/) · [redditez.com](https://embedez.com/reddit) · [API docs](https://embedez.com/docs) |
+| **FxTwitter / FxEmbed** by [@dangered wolf](https://github.com/dangeredwolf) | Rich X/Twitter embeds (auto-unfurl) + the free API — **primary tweet-data source** (round 11; its same-engine sister client **fixupx.com** is the stand-by host) used for media, stats, translation, GIF re-rendering and the video proxy | [fxtwitter.com](https://fxtwitter.com) · [docs.fxembed.com](https://docs.fxembed.com/) · [FxEmbed GitHub](https://github.com/FxEmbed/FxEmbed) · [GitHub](https://github.com/dangeredwolf) · 💖 [Sponsor dangered wolf](https://github.com/sponsors/dangeredwolf) |
+| **vxtwitter (BetterTwitFix / fixvx)** | **Backup tweet-data API** (round 11, 3rd in the fallback chain — multi-photo tweets arrive as separate photos via its API) + its **gifconvert** GIF converter (round 11) | [vxtwitter.com](https://vxtwitter.com) · [API docs](https://vxtwitter.com/api.md) |
+| **EmbedEZ** | Rich Reddit embeds (redditez.com mirror) + the provider API used by Reddit V2 + **last-resort tweet-data source** behind twitterez.com (round 11) | [embedez.com](https://embedez.com/) · [redditez.com](https://embedez.com/reddit) · [twitterez.com](https://twitterez.com) · [API docs](https://embedez.com/docs) |
 | **Embeddit** by [@DeltAndy123](https://github.com/DeltAndy123) | Alternative Reddit embed mirror (credited — its button was removed in the 2026-09-11 trim) | [GitHub](https://github.com/DeltAndy123/Embeddit) |
 | **vxReddit** by [@dylanpdx](https://github.com/dylanpdx) | Alternative Reddit embed mirror (credited — its button was removed in the 2026-09-11 trim) | [GitHub](https://github.com/dylanpdx/vxReddit) · [vxreddit.com](https://vxreddit.com) |
 | **Redlib** (community instances) | Reddit front-end mirrors used as RSS fallback sources — official instance list, refreshed 2026-09-12 | [redlib-instances](https://github.com/redlib-org/redlib-instances) · [redlib](https://github.com/redlib-org/redlib) |
-| **Arctic Shift** by [@ArthurHeitmann](https://github.com/ArthurHeitmann) | Optional Reddit archive JSON for V3 crosspost originals, ordered galleries including GIFs, and text/media fallbacks. Archive availability and freshness vary; fallback counts are labelled as archived. | [GitHub](https://github.com/ArthurHeitmann/arctic_shift) · [Website](https://arctic-shift.photon-reddit.com/) · [Download tool](https://arctic-shift.photon-reddit.com/download-tool) |
+| **Arctic Shift** by [@ArthurHeitmann](https://github.com/ArthurHeitmann) | Optional Reddit archive JSON for V3 crosspost originals, ordered galleries including GIFs, text/media fallbacks, and (round 17) the **per-subreddit search backup feed** when RSS yields no new posts. Archive availability and freshness vary; fallback counts are labelled as archived. | [GitHub](https://github.com/ArthurHeitmann/arctic_shift) · [Website](https://arctic-shift.photon-reddit.com/) · [Download tool](https://arctic-shift.photon-reddit.com/download-tool) |
 | **cron-job.org** | Free external scheduler that triggers the workflows reliably every 10 minutes | [cron-job.org](https://cron-job.org) |
 | **GitHub Actions** | Runs everything on a schedule, for free | — |
 | **Discord Webhooks** | Delivers messages to channels statelessly | — |
@@ -88,7 +89,7 @@ and to [@dangered wolf](https://github.com/dangeredwolf), creator and lead devel
 ├── .github/
 │   ├── dependabot.yml             # Dependabot: weekly pip + actions update PRs (optional)
 │   └── workflows/
-│       ├── twitter_monitor.yml    # X/Twitter — runs testing area/main_v3testproround10.py (V3)
+│       ├── twitter_monitor.yml    # X/Twitter — runs testing area/twitter_v3.py (V3)
 │       ├── reddit_monitor.yml     # ⚠️ OLD Reddit V1/V2 workflow — ARCHIVE it (Actions tab),
 │       │                          #    see "Testing & verification" — superseded by V3
 │       ├── reddit_monitor_v3.yml  # Reddit V3 (ACTIVE) — runs testing area/reddit_main_v3test.py
@@ -102,6 +103,7 @@ and to [@dangered wolf](https://github.com/dangeredwolf), creator and lead devel
 ├── testing area/                  # tested copies of every engine (see Testing area guide)
 │   ├── twitter_v2_button_outside.py     # X V2 (buttons outside)
 │   ├── twitter_v3.py              # X V3 (buttons inside — ACTIVE)
+│   ├── twitter_proxy.py           # X V3 tweet-data fallback chain (round 11: fxtwitter/fixupx/vxtwitter/twitterez)
 │   ├── reddit_main.py             # Reddit V1 (free, mirror auto-embed)
 │   ├── reddit_main_v2_embedez.py  # Reddit V2 (Components V2 via EmbedEZ API)
 │   ├── reddit_main_v3.py          # Reddit V3 (proxy media + native fallback — ACTIVE)
@@ -315,9 +317,64 @@ Fixes and formats added after real feed runs:
 
   As of 2026-09-13 this had happened exactly once (2 tiles out of hundreds of posts).
 
+## 🆕 X V2/V3 card behaviors — round 11 (2026-09-17): tweet-data fallback chain + GIF restructure
+
+* **Tweet data now has a 4-step fallback chain** (new module `testing
+  area/twitter_proxy.py` — the same "mix of services" idea as the Reddit
+  proxies, all keyless). The **main source is FxEmbed's FxTwitter API**
+  (`api.fxtwitter.com`, docs.fxembed.com); if it can't answer, the chain
+  continues seamlessly:
+  1. **fxtwitter** — primary (full features: media, quotes, X Articles,
+     `/en` translation, views).
+  2. **fixupx** (`api.fixupx.com`) — FxEmbed's sister client: **same engine,
+     same creator, same domain family** as fxtwitter.com — a hot stand-by on
+     a different host. Not listed in the public FxEmbed API docs, so if that
+     host doesn't resolve the step fails in ~0 ms and the chain continues —
+     safe either way.
+  3. **vxtwitter** (`api.vxtwitter.com` — BetterTwitFix, the site behind
+     vxtwitter.com/fixvx): text, media, quoted tweets, lang, epoch date,
+     stats. **Multi-photo tweets arrive as one entry per photo** (verified
+     live 2026-09-17 — its combined-grid image is a website-only
+     presentation field and is ignored). No view counts, no X Article
+     bodies.
+  4. **twitterez** (the EmbedEZ backend behind twitterez.com — the same
+     engine redditez.com uses for Reddit): keyless search API → stable key →
+     bot embed page og: tags. Media arrives as embedez redirect URLs (GIFs
+     as animated `.webp` that Discord loops natively), text + stats line
+     (`💬/🔁/💜/👀`, compact numbers incl. `1.5M`). Its occasional promo line
+     ("Add the EmbedEZ bot… (ad)") is stripped, and a video tweet's poster
+     frame is not duplicated as a photo.
+  **Seamless by design:** every service's result is normalized to the exact
+  FxTwitter `tweet` shape *before* the card pipeline runs, so layout, media,
+  stats, quotes, GIF handling and buttons are identical no matter who
+  answered. The winner is logged per tweet —
+  `V3 Posted: … (… | source=vxtwitter)` — and a fallback also logs
+  `tweet data via vxtwitter (fallback).` If the module file is ever
+  missing, the script logs a warning and runs the legacy direct FxTwitter
+  call — nothing breaks. `/en` translation is attempted only when the data
+  came from FxTwitter itself.
+* **GIF converter chain restructured** (fastgif went offline 2026-09-17).
+  Probed in order, never forced:
+  1. `gif.fxtwitter.com/tweet_video/*.webp` — FxTwitter's official animated
+     WebP (intermittent Cloudflare 530s, so probe-gated).
+  2. `gifconvert.vxtwitter.com/convert.webp?url=<mp4>` — BetterTwitFix's
+     converter (the exact URL shape vxtwitter's own embeds use — verified
+     live; they use `.avif`, which Discord's gallery can't render, so we
+     probe `.webp` first). Header-gated: probed with a browser Referer.
+  3. `gifconvert.vxtwitter.com/convert.gif?url=<mp4>`
+  4. `fastgif-production.up.railway.app/tweet_video/*.gif` — **offline since
+     2026-09-17** (404 on every route); kept as the *last* probe so it is
+     used automatically again if it ever comes back.
+  If nothing answers, the mp4 is kept (plays as a video) — unchanged.
+* **Reddit V3 got its matching backup the same round** — see the round-17
+  section under the Reddit monitor.
+
 ## 🌐 How translation works (all versions)
 
 1. The script fetches the tweet from the FxTwitter API and reads its `lang` field.
+   (Round 11: the tweet data may instead come from a backup service in the
+   fallback chain — see the round-11 section; the `/en` re-fetch below is
+   attempted only when the data came from FxTwitter itself.)
 2. If it's not English, it re-fetches `https://api.fxtwitter.com/<account>/status/<id>/en`, which
    returns FxTwitter's translated text.
 3. The message shows **🌐 Translated from {Language}** then the translation, then an
@@ -575,6 +632,29 @@ credits, no API key):
   unmarked-up ("Title⬆️ 1.1K • 💬 108" glued on one line, no `<a><b>`
   title) — the parser now handles both shapes and compact numbers
   (`1.1K` → 1100).
+
+### 🆕 Reddit V3 — round 17 (2026-09-17): Arctic Shift search backup
+
+* **Subreddits with NO new RSS posts are re-checked against the Arctic
+  Shift archive search API** (`/api/posts/search?subreddit=<sub>&sort=desc
+  &md2html=true`, limited to the 48-hour window) — the same post JSON shape
+  the crosspost-original lookup already uses. This covers what RSS can't:
+  a sub missing from the combined 100-entry feed, per-sub feeds dead or
+  bot-walled, or a quiet sub that simply didn't surface.
+* **Same pipeline, same guarantees:** archive posts are wrapped as
+  feedparser-style entries and run through the SAME `collect()` — the
+  dedup cache and the 48h freshness window still apply, so nothing can be
+  double-posted. Crossposts found in the archive still get the original
+  post's media/stats via the existing crosspost path.
+* **Never blocks posting:** the search runs only for subs RSS left empty,
+  returns `[]` on any failure (429/timeout/bad shape), and shares the
+  existing 3-strike circuit breaker with the crosspost archive lookup.
+  First run posts at most one archive post per sub (same anti-flood rule as
+  RSS). Log line: `[arctic <sub>] RSS had no new posts — trying N post(s)
+  from the archive.`
+* Note: Arctic's score/comment counts are stale for ~36 h after a post —
+  archive-sourced cards don't present those as live stats (same rule as the
+  existing crosspost-original path).
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1082,11 +1162,12 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
   over-length text) emitted an invalid empty text component. Fixed in round 4 — text is chunked and
   empty components are never sent. If it ever recurs, the Actions log prints the full Discord
   response next to the tweet ID.
-* **A GIF shows as a video player instead of an animated image** — both GIF converters were
+* **A GIF shows as a video player instead of an animated image** — every GIF converter was
   unreachable at post time (the log shows `No GIF converter answered ... keeping mp4 player`), so
-  the mp4 was kept as the safe fallback. This is rare: when `gif.fxtwitter.com` is down (530/1033),
-  the script automatically falls back to **fastgif** (`fastgif-production.up.railway.app`), logged
-  as `gif.fxtwitter.com down; using fastgif for ...`. Both recover on their own; nothing to do.
+  the mp4 was kept as the safe fallback. Round-11 chain: `gif.fxtwitter.com` `.webp` →
+  `gifconvert.vxtwitter.com` `.webp` → `gifconvert.vxtwitter.com` `.gif` → **fastgif**
+  (offline since 2026-09-17, last probe only); the log names the winner
+  (`gif.fxtwitter.com down; using gifconvert for ...`). They recover on their own; nothing to do.
 * **A portrait/vertical video loads but won't play right after posting** — this was a transient
   Discord proxy warm-up behavior (the same URLs play fine shortly after, confirmed across services).
   Direct URLs are the default again since round 5. If you ever confirm a *persistent* portrait
@@ -1113,6 +1194,37 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 11 (X V3) + round 17 (Reddit V3): tweet-data
+  fallback chain, GIF chain restructure, Arctic Shift search backup:**
+  * **X V3 tweet-data fallback chain** (new `testing area/twitter_proxy.py`):
+    **FxEmbed/FxTwitter** (primary) → **fixupx** (same engine, stand-by
+    host) → **vxtwitter** (BetterTwitFix API — multi-photo tweets as
+    separate photos) → **twitterez** (EmbedEZ bot page — ad lines
+    stripped, video posters not duplicated). Every result is normalized to
+    the FxTwitter shape, so cards are identical no matter which service
+    answered; the winner is logged per tweet. `/en` translation only when
+    the data came from FxTwitter.
+  * **X V3 GIF chain restructured:** `gif.fxtwitter.com` `.webp` →
+    `gifconvert.vxtwitter.com` `.webp` → `.gif` (browser-Referer probe) →
+    fastgif (offline 2026-09-17 — last probe, auto-revives if it returns).
+    `.avif` intentionally not used (Discord's gallery can't render it).
+  * **Reddit V3 Arctic Shift search backup:** subreddits with no new RSS
+    posts are re-checked via the archive's `/api/posts/search` (same post
+    shape as the crosspost lookup); archive posts run through the same
+    `collect()` (dedup + 48h window unchanged); soft-fail + shared circuit
+    breaker.
+  * **Smoke test:** first functional checks for the X V3 data path — GIF
+    chain order/probes, vxtwitter normalization (GIF, multi-photo, quotes),
+    twitterez og-page parsing (stats incl. `1.5M`, ad lines, posters),
+    fallback-chain order, Arctic search params/failures + entry shim
+    (40 new functional checks + the import gate — 199 total).
+  * **Docs updated:** this entry, the round-11/round-17 sections, credits,
+    troubleshooting, `docs/CI_SMOKE.md`, `PRIVACY_POLICY.md`,
+    `TERMS_OF_SERVICE.md`. **Untouched:** `twitter_v1.py`,
+    `twitter_v2_button_outside.py`, both workflow yml files,
+    `.env.example`, `.gitignore`, `requirements.txt` (no new secrets,
+    dependencies, or files at runtime).
 
 * **2026-09-16 — round 14 (Reddit V3 card polishing, after the first
   production runs):**
