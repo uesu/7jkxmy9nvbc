@@ -5,7 +5,11 @@ Purpose (also used by CI as the safety gate for Dependabot PRs):
   1. every monitor script imports cleanly (catches import-time breakage
      from dependency bumps),
   2. the Reddit V3 card pipeline still behaves (body cleaning, media
-     extraction/dedup, OP comment, components-v2 layout, button set).
+     extraction/dedup, OP comment, components-v2 layout, button set,
+     Arctic Shift search backup — round 17),
+  3. the X V3 tweet-data path still behaves (GIF converter chain,
+     vxtwitter normalization, twitterez og-page parsing, fallback-chain
+     order — round 11).
 """
 import os
 import sys
@@ -54,6 +58,7 @@ SCRIPTS = [
     "testing area/reddit_main_v3.py",
     "testing area/twitter_v2_button_outside.py",
     "testing area/twitter_v3.py",
+    "testing area/twitter_proxy.py",
     "testing area/video_diag.py",
 ]
 v3 = None
@@ -671,6 +676,374 @@ _nv4 = asyncio.run(proxy.fetch_proxy_post(None, "/r/X/comments/abc/", label="t",
 check("r16 need_video: warm-up-dead service still skipped",
       _nv4 and _nv4["service"] == "vxreddit", str(_nv4))
 proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = orig_nv_rr, orig_nv_vx, orig_nv_ed
+
+# ---- round 11: X V3 tweet-data fallback chain (twitter_proxy) -------------
+tpx = None
+try:
+    tpx = load_module("smoke_twitter_proxy", "testing area/twitter_proxy.py")
+except Exception as e:
+    tpx = None
+    check("import testing area/twitter_proxy.py", False, repr(e))
+
+if tpx is not None:
+    check("import testing area/twitter_proxy.py", True)
+
+    # --- GIF chain: order, probes, short-circuit (no network) --------------
+    async def round11_gif():
+        probes = []
+        orig_probe = tpx._probe_image_url
+
+        def make_fake(ok_map):
+            async def fake_probe(session, url, referer=None):
+                probes.append((url, referer))
+                return bool(ok_map(url))
+            return fake_probe
+
+        mp4 = "https://video.twimg.com/tweet_video/abc123DEF.mp4"
+
+        tpx._probe_image_url = make_fake(lambda u: "gif.fxtwitter.com" in u)
+        url, src = await tpx.resolve_gif_image(None, mp4)
+        check("r11 gif: fxtwitter .webp is first and wins",
+              url == "https://gif.fxtwitter.com/tweet_video/abc123DEF.webp" and src == "gif.fxtwitter",
+              f"{url} {src}")
+        check("r11 gif: short-circuits after the winner (1 probe)", len(probes) == 1, str(probes))
+
+        probes.clear()
+        tpx._probe_image_url = make_fake(lambda u: "gifconvert" in u and "/convert.webp" in u)
+        url, src = await tpx.resolve_gif_image(None, mp4)
+        check("r11 gif: gifconvert .webp is 2nd (referer-gated)",
+              src == "gifconvert" and "convert.webp" in url
+              and probes[1][1] == "https://vxtwitter.com", f"{url} {src} {probes[1:]}")
+        check("r11 gif: gifconvert URL carries the quoted mp4",
+              "?url=" in url and "video.twimg.com" in url.replace("%2F", "/").replace("%3A", ":"),
+              url)
+
+        probes.clear()
+        tpx._probe_image_url = make_fake(lambda u: "gifconvert" in u and "/convert.gif" in u)
+        url, src = await tpx.resolve_gif_image(None, mp4)
+        check("r11 gif: gifconvert .gif is 3rd",
+              src == "gifconvert" and "convert.gif" in url, f"{url} {src}")
+
+        probes.clear()
+        tpx._probe_image_url = make_fake(lambda u: "fastgif" in u)
+        url, src = await tpx.resolve_gif_image(None, mp4)
+        check("r11 gif: fastgif is last (4 probes, in order)",
+              src == "fastgif" and len(probes) == 4
+              and "gif.fxtwitter.com" in probes[0][0]
+              and "/convert.webp" in probes[1][0]
+              and "/convert.gif" in probes[2][0]
+              and "fastgif" in probes[3][0], str([p[0] for p in probes]))
+
+        probes.clear()
+        tpx._probe_image_url = make_fake(lambda u: False)
+        url, src = await tpx.resolve_gif_image(None, mp4)
+        check("r11 gif: nothing answers -> (None, '')", url is None and src == "", f"{url} {src}")
+
+        probes.clear()
+        tpx._probe_image_url = make_fake(lambda u: True)
+        url, src = await tpx.resolve_gif_image(None, "https://video.twimg.com/ext_tw_video/xyz.mp4")
+        check("r11 gif: non-tweet_video URLs are untouched",
+              url is None and src == "" and not probes, f"{url} {src} {probes}")
+        tpx._probe_image_url = orig_probe
+
+    asyncio.run(round11_gif())
+
+    # --- vxtwitter normalization --------------------------------------------
+    vx_sample = {
+        "tweetID": "2099906088489439483",
+        "tweetURL": "https://vxtwitter.com/PomPom_HonkaiSR/status/2099906088489439483",
+        "text": "three photos here",
+        "lang": "en",
+        "user_name": "PomPom", "user_screen_name": "PomPom_HonkaiSR",
+        "date": "Tue Sep 16 2026", "date_epoch": 1760640000,
+        "replies": 3, "retweets": 677, "likes": 6500,
+        "replyingTo": None, "replyingToID": None,
+        "qrt": {"tweetID": "111", "tweetURL": "https://vxtwitter.com/x/status/111",
+                "text": "quoted", "user_name": "X", "user_screen_name": "x",
+                "date_epoch": 1760000000, "replies": 1, "retweets": 2, "likes": 3,
+                "media_extended": []},
+        "media_extended": [
+            {"type": "image", "url": "https://pbs.twimg.com/media/p1.jpg",
+             "size": {"width": 640, "height": 1080}},
+            {"type": "image", "url": "https://pbs.twimg.com/media/p2.jpg",
+             "size": {"width": 640, "height": 1080}},
+            {"type": "image", "url": "https://pbs.twimg.com/media/p3.jpg",
+             "size": {"width": 640, "height": 1080}},
+            {"type": "gif", "url": "https://video.twimg.com/tweet_video/g1.mp4",
+             "thumbnail_url": "https://pbs.twimg.com/tweet_video_thumb/g1.jpg",
+             "duration_millis": 3000, "size": {"width": 1200, "height": 675}},
+        ],
+    }
+    t1 = tpx.normalize_vxtwitter(vx_sample)
+    check("r11 vx: base shape (id/text/author/stats/epoch/views N/A)",
+          t1 and t1["id"] == "2099906088489439483"
+          and t1["author"] == {"name": "PomPom", "screen_name": "PomPom_HonkaiSR"}
+          and (t1["replies"], t1["retweets"], t1["likes"]) == (3, 677, 6500)
+          and t1["created_timestamp"] == 1760640000 and t1["views"] == "N/A",
+          str(t1)[:200] if t1 else "None")
+    check("r11 vx: multi-photo keeps one entry per photo, in order",
+          [p["url"] for p in t1["media"]["photos"]]
+          == ["https://pbs.twimg.com/media/p1.jpg", "https://pbs.twimg.com/media/p2.jpg",
+              "https://pbs.twimg.com/media/p3.jpg"], str(t1["media"]["photos"]))
+    v0 = t1["media"]["videos"][0]
+    check("r11 vx: gif type + duration (ms -> s) + formats",
+          v0["type"] == "gif" and v0["duration"] == 3 and v0["formats"][0]["container"] == "mp4",
+          str(v0))
+    check("r11 vx: quote normalized recursively",
+          t1["quote"] and t1["quote"]["id"] == "111" and t1["quote"]["text"] == "quoted"
+          and t1["quote"]["media"] == {"videos": [], "photos": []}, str(t1["quote"]))
+    check("r11 vx: malformed payload -> None",
+          tpx.normalize_vxtwitter({"nope": 1}) is None and tpx.normalize_vxtwitter(None) is None)
+    t2 = tpx.normalize_vxtwitter(dict(vx_sample, media_extended=[
+        {"type": "video", "url": "https://video.twimg.com/ext_tw_video/v1.mp4",
+         "duration_millis": 120000, "size": {"width": 1920, "height": 1080}}]))
+    check("r11 vx: plain video (not gif) + dimensions",
+          t2["media"]["videos"][0]["type"] == "video"
+          and t2["media"]["videos"][0]["width"] == 1920
+          and t2["media"]["videos"][0]["duration"] == 120, str(t2["media"]["videos"]))
+
+    # --- twitterez og: parsing (dict meta) ----------------------------------
+    ez_meta = {
+        "og:url": "https://x.com/someone/status/2090000000000000001",
+        "og:title": "Someone (@someone)",
+        "og:description": ("**💬 2  🔁 140  💜 1K  👀 16.7K**\n"
+                           "actual tweet text line one\n"
+                           "actual tweet text line two"),
+        "og:image": "https://embedez.com/api/v2/redirect/k?path=content.media.0.source",
+    }
+    t3 = tpx.normalize_twitterez(ez_meta, "2090000000000000001")
+    check("r11 ez: stats line parsed + stripped (1K/16.7K) + author kept",
+          t3 and (t3["replies"], t3["retweets"], t3["likes"], t3["views"]) == (2, 140, 1000, 16700)
+          and "actual tweet text line one" in t3["text"]
+          and "💬" not in t3["text"]
+          and t3["author"]["name"] == "Someone (@someone)",
+          str(t3["text"])[:120] if t3 else "None")
+    check("r11 ez: photo from og:image",
+          t3 and t3["media"]["photos"]
+          == [{"url": "https://embedez.com/api/v2/redirect/k?path=content.media.0.source"}],
+          str(t3["media"]) if t3 else "None")
+    ez_gif = {"og:title": "G", "og:description": "gif text",
+              "og:video:secure_url": "https://video.twimg.com/tweet_video/g1.mp4"}
+    t4 = tpx.normalize_twitterez(ez_gif, "2")
+    check("r11 ez: tweet_video og:video -> gif type",
+          t4 and t4["media"]["videos"][0]["type"] == "gif" and t4["media"]["photos"] == [],
+          str(t4["media"]) if t4 else "None")
+    ez_multi = {
+        "og:title": "M", "og:description": "multi",
+        "og:image": ["https://embedez.com/api/v2/redirect/m?path=content.media.0.source",
+                     "https://embedez.com/api/v2/redirect/m?path=content.media.1.source",
+                     "https://embedez.com/api/v2/redirect/m?path=content.media.2.source",
+                     "https://embedez.com/api/v2/redirect/m?path=content.media.3.source"],
+    }
+    t7 = tpx.normalize_twitterez(ez_multi, "3")
+    check("r11 ez: 4-photo gallery order (dict meta)",
+          t7 and [p["url"].rsplit("=", 1)[-1] for p in t7["media"]["photos"]]
+          == ["content.media.0.source", "content.media.1.source",
+              "content.media.2.source", "content.media.3.source"],
+          str(t7["media"]["photos"]) if t7 else "None")
+    check("r11 ez: empty meta -> None",
+          tpx.normalize_twitterez({}, "x") is None and tpx.normalize_twitterez(None, None) is None)
+
+    # --- twitterez real bot-page HTML (og: tags end-to-end) -----------------
+    ez_page_video = (
+        "<html><head>"
+        '<meta property="og:title" content="Video Poster Guy (@vp)" />'
+        '<meta property="og:url" content="https://x.com/vp/status/9001" />'
+        '<meta property="og:description" content="**💬 4  🔁 210  💜 2K  👀 1.5M**\n'
+        "a video tweet\n"
+        "[Add](https://embedez.com/t/test-bot) the EmbedEZ bot to your server *(ad)*"
+        '" />'
+        '<meta property="og:video:secure_url" '
+        'content="https://proxy.embedez.com/advanced.mp4?url=https%3A%2F%2Fvideo.twimg.com%2Fext_tw_video%2Fv9.mp4" />'
+        '<meta property="og:image" '
+        'content="https://proxy.embedez.com/thumbnail?url=https%3A%2F%2Fvideo.twimg.com%2Fext_tw_video%2Fv9.mp4" />'
+        "</head><body></body></html>"
+    )
+    m1 = tpx._og_meta(ez_page_video)
+    t5 = tpx.normalize_twitterez(m1, "9001")
+    check("r11 ez page: video tweet -> video kept, poster skipped",
+          t5 and len(t5["media"]["videos"]) == 1 and t5["media"]["photos"] == [],
+          str(t5["media"]) if t5 else "None")
+    check("r11 ez page: 1.5M views + 2K likes parsed",
+          t5 and t5["views"] == 1500000 and t5["likes"] == 2000,
+          f"{t5['views']} {t5['likes']}" if t5 else "None")
+    check("r11 ez page: ad line stripped from text",
+          t5 and "embedez.com" not in t5["text"].lower()
+          and "*(ad)*" not in t5["text"] and "a video tweet" in t5["text"],
+          repr(t5["text"]) if t5 else "None")
+    ez_page_photos = (
+        "<html><head>"
+        '<meta property="og:title" content="Gallery Gal (@gg)" />'
+        '<meta property="og:description" content="**💬 3  🔁 677  💜 6.5K  👀 48.8K**\nfour photos" />'
+        '<meta property="og:image" content="https://embedez.com/api/v2/redirect/k1?path=content.media.0.source" />'
+        '<meta property="og:image" content="https://embedez.com/api/v2/redirect/k1?path=content.media.1.source" />'
+        '<meta property="og:image" content="https://embedez.com/api/v2/redirect/k1?path=content.media.1.source" />'
+        '<meta property="og:image" content="https://embedez.com/api/v2/redirect/k1?path=content.media.3.source" />'
+        "</head><body></body></html>"
+    )
+    m2 = tpx._og_meta(ez_page_photos)
+    t6 = tpx.normalize_twitterez(m2, "9002")
+    check("r11 ez page: 6.5K/48.8K compact stats parsed",
+          t6 and t6["likes"] == 6500 and t6["views"] == 48800,
+          f"{t6['likes']} {t6['views']}" if t6 else "None")
+    check("r11 ez page: 4 photos, in order",
+          t6 and len(t6["media"]["photos"]) == 4
+          and t6["media"]["photos"][1]["url"].endswith("content.media.1.source"),
+          str(t6["media"]["photos"]) if t6 else "None")
+    check("r11 ez page: empty page -> None",
+          tpx.normalize_twitterez(tpx._og_meta(""), None) is None)
+
+    # --- fallback chain order (monkeypatched fetchers, no network) ----------
+    async def round11_chain():
+        calls = []
+        fake_fx = {"id": "77", "text": "fx",
+                   "author": {"name": "F", "screen_name": "f"},
+                   "media": {"videos": [], "photos": []}}
+        fake_vx = {"id": "77", "text": "vx",
+                   "author": {"name": "V", "screen_name": "v"},
+                   "media": {"videos": [], "photos": []}}
+        fake_ez = {"id": "77", "text": "ez",
+                   "author": {"name": "E", "screen_name": "e"},
+                   "media": {"videos": [], "photos": []}}
+
+        def make_ok(name, payload):
+            async def ok(session, screen, tid, label=""):
+                calls.append(name)
+                return dict(payload)
+            return ok
+
+        def make_no(name):
+            async def no(session, screen, tid, label=""):
+                calls.append(name)
+                return None
+            return no
+
+        async def fx_boom(session, screen, tid, label=""):
+            calls.append("fxtwitter")
+            raise RuntimeError("boom")
+
+        orig = (tpx._fetch_fxtwitter, tpx._fetch_fixupx,
+                tpx._fetch_vxtwitter, tpx._fetch_twitterez)
+        try:
+            tpx._fetch_fxtwitter = make_ok("fxtwitter", fake_fx)
+            tpx._fetch_fixupx = make_no("fixupx")
+            tpx._fetch_vxtwitter = make_no("vxtwitter")
+            tpx._fetch_twitterez = make_no("twitterez")
+            calls.clear()
+            tweet, src = await tpx.fetch_tweet_details_any(None, "scr", "77", "t")
+            check("r11 chain: fxtwitter wins (primary)",
+                  src == "fxtwitter" and tweet["id"] == "77", f"{src}")
+            check("r11 chain: stops at the winner (1 call)", calls == ["fxtwitter"], str(calls))
+
+            calls.clear()
+            tpx._fetch_fxtwitter = make_no("fxtwitter")
+            tpx._fetch_vxtwitter = make_ok("vxtwitter", fake_vx)
+            tweet, src = await tpx.fetch_tweet_details_any(None, "scr", "77", "t")
+            check("r11 chain: vxtwitter fallback (fx+fixupx fail)",
+                  src == "vxtwitter" and calls == ["fxtwitter", "fixupx", "vxtwitter"],
+                  f"{src} {calls}")
+
+            calls.clear()
+            tpx._fetch_vxtwitter = make_no("vxtwitter")
+            tpx._fetch_twitterez = make_ok("twitterez", fake_ez)
+            tweet, src = await tpx.fetch_tweet_details_any(None, "scr", "77", "t")
+            check("r11 chain: twitterez is the last resort (4 calls)",
+                  src == "twitterez" and len(calls) == 4, f"{src} {calls}")
+
+            calls.clear()
+            tpx._fetch_twitterez = make_no("twitterez")
+            tweet, src = await tpx.fetch_tweet_details_any(None, "scr", "77", "t")
+            check("r11 chain: all fail -> (None, None)",
+                  tweet is None and src is None and len(calls) == 4, str(calls))
+
+            calls.clear()
+            tpx._fetch_fxtwitter = fx_boom
+            tpx._fetch_vxtwitter = make_ok("vxtwitter", fake_vx)
+            tweet, src = await tpx.fetch_tweet_details_any(None, "scr", "77", "t")
+            check("r11 chain: a fetcher exception is swallowed (chain continues)",
+                  src == "vxtwitter", f"{src} {calls}")
+        finally:
+            (tpx._fetch_fxtwitter, tpx._fetch_fixupx,
+             tpx._fetch_vxtwitter, tpx._fetch_twitterez) = orig
+
+    asyncio.run(round11_chain())
+
+# ---- round 17: Arctic Shift search backup (v3) ----------------------------
+class _ArcticResp:
+    def __init__(self, status, data):
+        self.status = status
+        self.data = data
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        pass
+
+    async def json(self, **k):
+        return self.data
+
+arctic_calls = []
+
+def _arctic_session(status, data):
+    def get(url, params=None, **k):
+        arctic_calls.append((url, params))
+        return _ArcticResp(status, data)
+    return SimpleNamespace(get=get)
+
+arc_posts = [
+    {"id": "1wgaaa1", "subreddit": "AnantaLeaks", "title": "Archive A",
+     "author": "userA", "created_utc": 1760630000, "updated_utc": 1760630010,
+     "body": "<p>body A</p>"},
+    {"id": "1wgbbb2", "subreddit": "AnantaLeaks", "title": "Archive B",
+     "author": "userB", "created_utc": 1760620000, "updated_utc": 1760620005,
+     "body": "<p>body B</p>"},
+]
+orig_arctic_fail = v3._arctic_fail_count
+v3._arctic_fail_count = 0
+arctic_calls.clear()
+got = asyncio.run(v3.fetch_arctic_subreddit_posts(
+    _arctic_session(200, {"data": arc_posts}), "AnantaLeaks",
+    after_epoch=1760600000, label="t"))
+check("r17 arctic: valid response -> post dicts",
+      [p["id"] for p in got] == ["1wgaaa1", "1wgbbb2"], str(got))
+check("r17 arctic: params (subreddit/limit/sort/md2html/after)",
+      arctic_calls and arctic_calls[0][0].endswith("/api/posts/search")
+      and arctic_calls[0][1].get("subreddit") == "AnantaLeaks"
+      and arctic_calls[0][1].get("sort") == "desc"
+      and arctic_calls[0][1].get("md2html") == "true"
+      and arctic_calls[0][1].get("after") == "1760600000", str(arctic_calls[:1]))
+check("r17 arctic: empty data -> []",
+      asyncio.run(v3.fetch_arctic_subreddit_posts(
+          _arctic_session(200, {"data": []}), "AnantaLeaks", label="t")) == [])
+v3._arctic_fail_count = 0
+check("r17 arctic: 429 -> [] (soft fail, counts as outage)",
+      asyncio.run(v3.fetch_arctic_subreddit_posts(
+          _arctic_session(429, {}), "AnantaLeaks", label="t")) == []
+      and v3._arctic_fail_count == 1)
+v3._arctic_fail_count = 3
+calls_before = len(arctic_calls)
+check("r17 arctic: circuit breaker skips when tripped",
+      asyncio.run(v3.fetch_arctic_subreddit_posts(
+          _arctic_session(200, {"data": arc_posts}), "AnantaLeaks", label="t")) == []
+      and len(arctic_calls) == calls_before)
+v3._arctic_fail_count = orig_arctic_fail
+
+e = v3._ArcticEntry(arc_posts[0])
+check("r17 entry: link/title/author",
+      e.link == "https://www.reddit.com/r/AnantaLeaks/comments/1wgaaa1/"
+      and e.title == "Archive A" and e.author == "userA", str(e.link))
+check("r17 entry: timestamps + body",
+      e.get("published_parsed") is not None and e.get("updated_parsed") is not None
+      and e.get("content")[0]["value"] == "<p>body A</p>", str(e.get("content")))
+cp_entry = v3._ArcticEntry(dict(arc_posts[0], body=(
+    "u/x crossposted this from r/Ananta2027 — original post "
+    "https://www.reddit.com/r/Ananta2027/comments/1wgjebk/houses/")))
+check("r17 entry: crosspost permalink detected (original path)",
+      v3.find_crosspost_original_path(cp_entry.get("content")[0]["value"], e.link)
+      == "/r/Ananta2027/comments/1wgjebk/",
+      str(v3.find_crosspost_original_path(cp_entry.get("content")[0]["value"], e.link)))
+check("r17 entry: .get default like feedparser", e.get("nope") is None)
 
 asyncio.run(round15_flows())
 asyncio.run(round15_fetch())
