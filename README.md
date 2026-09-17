@@ -432,6 +432,28 @@ automatically posts the missed 2026-09-17 tweets (WW song credits + video,
 the 08:00 wallpaper, the TYPEII_EN repost of @zeroartwo, and the Ananta_EN
 11:37 giveaway-winner announcement) — no manual action needed.
 
+## 🆕 X V2/V3 — round 13 (2026-09-17): repost attribution
+
+When a tracked account **reposts** (retweets) someone else's tweet, the card
+now says who did the reposting instead of presenting it as the original
+author's own tweet:
+
+* **Header:** `### [TYPEII_EN reposted](https://x.com/TYPEII_EN)` — the
+  reposting account (screen name, per 2026-09-17) linking to its profile.
+* **Original line under the header:** `-# 📌 Original: [円 (@zeroartwo)](https://x.com/zeroartwo)`
+  so the true author stays visible.
+* Everything else is unchanged: the *Read Post* button still opens the
+  original tweet, stats/timestamp are the original's, translation and media
+  work exactly as before.
+
+**How it's detected (no new API needed):** a nitter feed for an account
+contains only that account's own tweets and its reposts — so when the true
+author returned by the tweet-data API differs from the feed account, the
+entry is a repost by the feed account. (FxEmbed's payload does include a
+`reposted_by` field, but it is only set when the RETWEET's own status id is
+queried; nitter RSS links point at the original author's status, so the feed
+itself is the signal.)
+
 ## 🌐 How translation works (all versions)
 
 1. The script fetches the tweet from the FxTwitter API and reads its `lang` field.
@@ -1321,6 +1343,36 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — X V2 catch-up: rounds 11 + 12 backported from V3** (V2 is
+  the standby engine — `twitter_monitor.yml` still runs V3, so live output
+  is unchanged):
+  * **Round 11 — tweet-data fallback chain.** V2 now uses the shared
+    `twitter_proxy` chain (FxTwitter → fixupx → vxtwitter → twitterez)
+    via a soft import, so it no longer depends on FxTwitter alone. The
+    `/en` translation call is now attempted only when the data really came
+    from FxTwitter (the backup services have no `/en` endpoint), and the
+    winning service is logged as `source=...`.
+  * **Round 12 — nitter fleet.** V2's `RSS_INSTANCES` was still the old
+    4-instance list (all stale/dead in round 12's probes); it now uses the
+    same refreshed 11-instance fleet as V3. Every attempt is logged per
+    instance, a dead fleet raises `NO working nitter instance` /
+    `ALL FEEDS FAILED this run`, `NITTER_RSS_TOKEN` unlocks the
+    token-gated instance, and `TEST_TWEET_ID` can rebuild one tweet
+    nitter-free.
+  * **Bugfix found while porting:** V2 computed the first-run limit
+    (`entries`) but then iterated `feed.entries`, so a first run posted
+    *every* feed entry instead of just the newest. It now iterates
+    `entries`, matching V3.
+
+* **2026-09-17 — round 13 (X V3): repost attribution** — a reposted tweet
+  now shows `[<account> reposted](https://x.com/<account>)` in the header
+  (e.g. `[TYPEII_EN reposted](https://x.com/TYPEII_EN)`) plus a
+  `📌 Original:` line naming the true author, instead of impersonating the
+  original author's own tweet. Detected from the feed itself (author from
+  the tweet-data API ≠ feed account — FxEmbed's `reposted_by` field only
+  works with the retweet's own id, which nitter RSS doesn't carry); Read
+  Post, stats, translation and media are unchanged.
 
 * **2026-09-17 — round 12 (X V3): nitter fleet resilience + visible failures
   + TEST_TWEET_ID + RSS-token support** (the X monitor silently no-oped on
