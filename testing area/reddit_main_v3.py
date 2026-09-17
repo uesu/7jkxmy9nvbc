@@ -157,6 +157,16 @@
 #       then redlib) can actually retrieve it; otherwise it is skipped
 #       and NOT cached, so it posts normally once approved or restored.
 #       RSS posts and TEST POST rebuilds are unaffected.
+#   18. (round 21, 2026-09-17) RAW PLAIN LINKS — the card body now matches
+#       the original post as RAW text: (a) the round-20 mangle fix
+#       outputs 'label + bare URL' (no markdown wrapping); (b) a bare
+#       URL line under a plain label line (the original post's
+#       "label / URL" pair, with or without a blank line between)
+#       becomes ONE plain 'label https://...' line; (c) standalone
+#       bare URL lines are no longer wrapped in markdown — they stay
+#       raw and Discord auto-links them in the component v2 container.
+#       Clean markdown links, prose and all round 15/16 shapes stay
+#       byte-identical.
 #
 # ■ WORKFLOW: identical to V1/V2. Test-area first:
 #   run: python "testing area/reddit_main_v3.py"
@@ -682,24 +692,24 @@ def strip_html(value: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ■ ROUND 20 (2026-09-17): SIMPLE 'PLAIN LINK' MANGLE FIX (post 1whe2tr)
+# ■ ROUND 20/21 (2026-09-17): SIMPLE RAW 'PLAIN LINK' MANGLE FIX (1whe2tr)
 # Replaces the round 19 rule with the simple fix. The original post is a
-# PLAIN link line ("Firefly video" + a bare URL), so a mangled line — the
+# RAW plain line ("Firefly video" + a bare URL), so a mangled line — the
 # feed's doubled/nested URL-link garbage, e.g.
 #   Firefly video [[U](U)](U](U))     (the doubled card shape)
 #   Firefly video [U](U](U))          (the feed's plain shape)
-#   or any deeper nesting of the same shape
-# — collapses to ONE clean line with the URL exactly once, as a plain
-# clickable link, exactly like the original post:
-#   Firefly video [U](U)
+#   the multi-line family, or any deeper nesting of the same shape
+# — collapses to ONE plain line with the BARE URL exactly once, raw —
+# exactly like the original post (Discord auto-links the bare URL in the
+# component v2 container; NO markdown wrapping):
+#   Firefly video https://b23.tv/...
 # Detection (all must hold): the line's URL appears 2+ times (a mangle
 # repeats it), the URL sits right after a markdown '[' opener, and the
 # line is not fully explained by well-formed '[text](url)' links + prose
 # (a mangle leaves the URL in garbage tails like '](U](U))' or
-# unbalanced brackets). Clean single links, repeated real links, bare-URL
-# lines, prose and every round 15/16 shape are left byte-identical;
-# repair_mangled_link_lines still runs after this pre-pass and keeps
-# handling the multi-line family exactly as before.
+# unbalanced brackets). Clean single links, repeated real links, raw
+# label+URL lines, bare-URL lines, prose and every round 15/16 shape are
+# left byte-identical.
 # ---------------------------------------------------------------------------
 _LINK_OK = re.compile(r"\[[^\[\]]*\]\(https?://[^\s()]*\)")
 
@@ -708,8 +718,8 @@ def _fix_doubled_link_line(line: str) -> str:
     if not um:
         return line
     url = um.group(0)
-    # A mangle repeats the same URL; a plain link line has it exactly
-    # twice (the '[U](U)' text + target).
+    # A mangle repeats the same URL; a plain line has it at most twice
+    # (the '[U](U)' text + target of ONE real link).
     if line.count(url) < 2:
         return line
     head = line[:um.start()]
@@ -729,14 +739,35 @@ def _fix_doubled_link_line(line: str) -> str:
         return line
     label = re.sub(r"[\[\][ \t]+", " ", head)
     label = re.sub(r"\s{2,}", " ", label).strip()
-    return (label + " " if label else "") + f"[{url}]({url})"
+    # ONE plain line, the bare URL exactly once — raw, exactly like the
+    # original post. Discord auto-links the bare URL in the container.
+    return (label + " " if label else "") + url
 
 
 def _repair_label_url_mangle(lines: list) -> list:
-    """Round 20 pre-pass for repair_mangled_link_lines: one plain
-    'label [U](U)' line per mangled link line; clean lines and the
-    round 15/16 shapes pass through byte-identical."""
-    return [_fix_doubled_link_line(line.strip()) for line in lines]
+    """Round 20/21 pre-pass for repair_mangled_link_lines:
+      * a mangled link line collapses to one plain 'label + bare URL'
+        line (round 20);
+      * a bare URL line under a plain label line (the original post's
+        "label / URL" pair, at most one blank line between) becomes ONE
+        plain 'label URL' line (round 21).
+    Clean lines and the round 15/16 shapes pass through byte-identical;
+    repair_mangled_link_lines still runs afterwards and keeps handling
+    the multi-line family exactly as before."""
+    out = []
+    for raw in lines:
+        line = _fix_doubled_link_line(raw.strip())
+        if re.fullmatch(r"https?://[^\s\[\]]+", line) and out:
+            if out[-1] and not re.search(r"https?://", out[-1]):
+                out[-1] = out[-1] + " " + line
+                continue
+            if (len(out) >= 2 and out[-1] == "" and out[-2]
+                    and not re.search(r"https?://", out[-2])):
+                out[-2] = out[-2] + " " + line
+                out.pop()
+                continue
+        out.append(line)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -924,8 +955,8 @@ def _line_stage(lines: list) -> list:
         line = re.sub(r"\[[^\]]*\]\(https?://v\.redd\.it/[^\s)]*\)", "", line)
         line = re.sub(r"https?://v\.redd\.it/[^\s<>\])]*", "", line)
         line = re.sub(r"[ \t]{2,}", " ", line).strip()
-        if re.fullmatch(r"https?://[^\s\[\]]+", line):
-            line = f"[{line}]({line})"
+        # round 21: a bare URL line stays RAW — Discord auto-links it in
+        # the component v2 container (no markdown wrapping).
         kept.append(line)
     return kept
 
