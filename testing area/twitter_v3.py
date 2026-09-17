@@ -30,9 +30,12 @@
 #     in the gallery are re-pointed through FxTwitter's embed proxy
 #     (api.fxtwitter.com/2/go?url=...), the exact URL V1 embeds use, which
 #     plays them correctly.
-#   • /status/:id API path — the screen-name path 404s for reposts/articles/
-#     some newer tweets (verified live); the plain-ID path always resolves.
-#     Read Post links use the TRUE author from the payload.
+#   • /status/:id API path — FxTwitter resolves purely by tweet id and
+#     ignores the screen name in the path (re-verified 2026-09-17: even a
+#     nonexistent handle returns 200 with the correct payload, so the old
+#     "screen-name path 404s for reposts/articles" note no longer holds).
+#     Plain-ID is used as the shortest form. Read Post links use the TRUE
+#     author from the payload.
 #   • "↩️ Replying to @user" line when the tweet is a reply.
 #   • Custom animated button emoji (starwardhmm / starward11 / starwardfans).
 #   • ROUND 5 (2026-09-11): portrait proxy-wrap retracted to an opt-in
@@ -822,10 +825,20 @@ async def fetch_tweet_details(session: aiohttp.ClientSession, account: str, twee
                               lang_suffix: str = "") -> dict | None:
     """
     Fetches tweet data from FxTwitter's API using the PLAIN-ID path
-    (/status/:id). The screen-name path (/<name>/status/:id) returns 404 for
-    reposts of other authors' tweets, X Articles, and some newer tweets —
-    verified live — while the plain-ID path resolves all of them. The true
-    author is read from the payload afterwards. lang_suffix: '/en' etc.
+    (/status/:id). The true author is read from the payload afterwards
+    (which is what round-13 repost detection relies on), so a REPOST
+    resolves to the ORIGINAL author, never the feed account.
+    lang_suffix: '/en' etc.
+
+    CORRECTED 2026-09-17: an earlier version of this comment claimed the
+    screen-name path (/<name>/status/:id) returns 404 for reposts of other
+    authors' tweets, X Articles and some newer tweets. Re-verified live on
+    2026-09-17 — that is NO LONGER TRUE. FxTwitter resolves purely by tweet
+    id and ignores the screen name in the path: api.fxtwitter.com/<anything>
+    /status/2099456877558202445 returns HTTP 200 with the correct @zeroartwo
+    payload, even for a screen name that does not exist. The plain-id path
+    is kept because it is the shortest form and cannot drift out of sync
+    with the payload's author — NOT because the other path 404s.
 
     ROUND 11: normally the round-11 fallback chain
     (twitter_proxy.fetch_tweet_details_any) is used instead; this legacy
@@ -874,7 +887,8 @@ def build_v3_payload(account: str, tweet: dict, read_post_url: str,
                      display_text: str | None = None, posted_ts: int | None = None,
                      gallery_items: list | None = None, media_notes: list | None = None,
                      quote_components: list | None = None, reply_line: str | None = None,
-                     lead_gallery_items: list | None = None) -> dict:
+                     lead_gallery_items: list | None = None,
+                     repost_account: str | None = None) -> dict:
     """Constructs the V3 layout with buttons nested inside the type 17 container."""
     author = tweet.get("author", {}) or {}
     author_name = (author.get("name") or "").strip() or account
@@ -900,9 +914,22 @@ def build_v3_payload(account: str, tweet: dict, read_post_url: str,
     likes = tweet.get("likes", 0)
     views = tweet.get("views", "N/A")
 
-    inner_components = [
-        {"type": 10, "content": f"### [{author_name}](https://x.com/{screen_name}) just tweeted:"},
-    ]
+    if repost_account:
+        # round 13 (2026-09-17): repost — attribute the account that reposted
+        # it (screen name as the label, per 2026-09-17), and keep the true
+        # author visible on the line below.
+        inner_components = [
+            {"type": 10,
+             "content": (f"### [{repost_account} reposted]"
+                         f"(https://x.com/{repost_account})")},
+            {"type": 10,
+             "content": (f"-# 📌 Original: [{author_name} "
+                         f"(@{screen_name})](https://x.com/{screen_name})")},
+        ]
+    else:
+        inner_components = [
+            {"type": 10, "content": f"### [{author_name}](https://x.com/{screen_name}) just tweeted:"},
+        ]
     if reply_line:
         inner_components.append({"type": 10, "content": reply_line})
     if lead_gallery_items:  # ROUND 10: article cover, shown right under the header
@@ -1022,6 +1049,18 @@ async def main():
                 author_data = tweet_data.get("author", {}) or {}
                 author_screen = author_data.get("screen_name") or account
                 read_post_url = f"https://fxtwitter.com/{author_screen}/status/{tweet_id}"
+
+                # round 13 (2026-09-17): repost detection. A nitter feed for
+                # an account contains only that account's own tweets and its
+                # reposts — so when the TRUE author from the payload differs
+                # from the feed account, this entry is a REPOST by the feed
+                # account. (FxEmbed's payload does carry a `reposted_by` field,
+                # but it is only populated when the RETWEET's own status id is
+                # queried — the nitter RSS links point at the ORIGINAL
+                # author's status, so the feed itself is the signal.)
+                repost_account = (account
+                                  if author_screen.lower() != account.lower()
+                                  else None)
                 status_page_url = f"https://x.com/{author_screen}/status/{tweet_id}"
                 display_text = None
 
@@ -1109,7 +1148,8 @@ async def main():
                                            display_text=display_text, posted_ts=posted_ts,
                                            gallery_items=gallery_items, media_notes=media_notes,
                                            quote_components=quote_components, reply_line=reply_line,
-                                           lead_gallery_items=lead_gallery)
+                                           lead_gallery_items=lead_gallery,
+                                           repost_account=repost_account)
                 target_url = f"{webhook_url}?with_components=true"
                 async with session.post(target_url, json=payload) as resp:
                     if resp.status in (200, 204):

@@ -31,9 +31,12 @@
 #     in the gallery are re-pointed through FxTwitter's embed proxy
 #     (api.fxtwitter.com/2/go?url=...), the exact URL V1 embeds use, which
 #     plays them correctly.
-#   • /status/:id API path — the screen-name path 404s for reposts/articles/
-#     some newer tweets (verified live); the plain-ID path always resolves.
-#     Read Post links use the TRUE author from the payload.
+#   • /status/:id API path — FxTwitter resolves purely by tweet id and
+#     ignores the screen name in the path (re-verified 2026-09-17: even a
+#     nonexistent handle returns 200 with the correct payload, so the old
+#     "screen-name path 404s for reposts/articles" note no longer holds).
+#     Plain-ID is used as the shortest form. Read Post links use the TRUE
+#     author from the payload.
 #   • "Replying to @user" line when the tweet is a reply.
 #   • Custom animated button emoji (starwardhmm / starward11 / starwardfans).
 #   • ROUND 5 (2026-09-11): portrait proxy-wrap retracted to an opt-in
@@ -75,6 +78,16 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 load_dotenv()
 
+# ROUND 11 (backported from V3, 2026-09-17): tweet-data fallback chain
+# (fxtwitter -> fixupx -> vxtwitter -> twitterez). Soft import: if the
+# module file is missing, the script logs a warning and keeps using the
+# legacy direct FxTwitter call.
+try:
+    import twitter_proxy
+except Exception as e:  # only when the file is absent from the repo
+    twitter_proxy = None
+    logging.warning(f"twitter_proxy unavailable ({e}) — using direct FxTwitter only.")
+
 ACCOUNTS_STR = os.getenv("ACCOUNTS", "TYPEII_EN,PomPom_HonkaiSR,Wuthering_Waves,HonkaiNA,Ananta_EN")
 ACCOUNTS = [acc.strip() for acc in ACCOUNTS_STR.split(",") if acc.strip()]
 
@@ -84,12 +97,48 @@ CACHE_FILE = "posted_tweets.json"
 MAX_CACHE_SIZE = 500
 MAX_AGE_SECONDS = 3 * 3600
 
+# round 12 (backported from V3, 2026-09-17): nitter fleet refreshed from the
+# status.d420.de tracker (2026-09-17) + live plain-RSS probes. The tracker's
+# health/RSS flags flip back and forth, so the WHOLE tracked fleet is listed
+# — order is today's evidence (verified-fresh first, known-dead last); the
+# chain stops at the first instance that answers with real entries.
+#   jaydenha.uk        verified fresh via plain RSS probe (2026-09-17) -> FIRST
+#   meowing.monster    verified fresh via plain RSS probe (2026-09-17)
+#   click / xitter.cc  RSS "disabled" at probe time — kept: the tracker's RSS
+#                      flags flip back and forth
+#   miningtcup.me      healthy, RSS ok BUT behind a bot check — needs the
+#                      emailed RSS token (see RSS_TOKEN_ENV); without a valid
+#                      token the chain logs the challenge and moves on
+#   netbub             unreachable at probe time (flags flip back)
+#   thepixora          alive but behind a dog-captcha bot check (2026-09-17)
+#   perennialte.ch     serves a STALE RSS (site works in browsers)
+#   privacydev.net / nitter.net  500'd on 2026-09-17
+#   xcancel.com        suspended 2026-09-14 — kept: auto-revives in the chain
+#                      if it returns
 RSS_INSTANCES = [
+    "https://nitter.jaydenha.uk",
+    "https://nitter.meowing.monster",
+    "https://nitter.click",
+    "https://nitter.xitter.cc",
+    "https://nitter.miningtcup.me",
+    "https://nitter.netbub.com",
+    "https://shitter.thepixora.com",
     "https://nitter.perennialte.ch",
     "https://nitter.privacydev.net",
     "https://nitter.net",
     "https://xcancel.com",
 ]
+
+# round 12 (backported from V3, 2026-09-17): token-gated instances.
+# nitter.miningtcup.me hides its RSS behind a bot check; the operator emails
+# out RSS tokens (request sent to nitter-rss@miningtcup.me). When the token
+# arrives, set it as the repo VARIABLE NITTER_RSS_TOKEN (Settings -> Secrets
+# and variables -> Actions -> Variables) — the next run picks it up (read at
+# call time, no code change). The token is sent BOTH ways: Authorization:
+# Bearer header and ?token= query param, so either convention works.
+RSS_TOKEN_ENV = {
+    "https://nitter.miningtcup.me": "NITTER_RSS_TOKEN",
+}
 
 FXTWITTER_API_BASE = "https://api.fxtwitter.com"
 FXTWITTER_VIDEO_PROXY = "https://api.fxtwitter.com/2/go?url="
@@ -655,20 +704,85 @@ def build_quote_components(quote: dict, q_gallery: list, q_notes: list) -> list:
     return components
 
 
+def parse_test_tweet_id(value: str) -> tuple:
+    """round 12 (backported from V3, 2026-09-17): TEST_TWEET_ID recovery helper.
+
+    Accepts 'screen_name/tweet_id' or a full x.com/twitter.com status URL
+    and returns (screen_name, tweet_id), or (None, None) when unparseable.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None, None
+    if "status/" in value:
+        match = re.search(r"status/(\d+)", value)
+        if not match:
+            return None, None
+        tweet_id = match.group(1)
+        before = value.split("/status/", 1)[0].rstrip("/")
+        account = before.rsplit("/", 1)[-1]
+        return (account or None), tweet_id
+    # bare screen_name/tweet_id form
+    account, _, tweet_id = value.partition("/")
+    account, tweet_id = account.strip(), tweet_id.strip()
+    if account and re.fullmatch(r"\d+", tweet_id):
+        return account, tweet_id
+    return None, None
+
+
+class _TestFeedEntry:
+    """A feedparser-shaped entry for ONE specific tweet (test-tweet mode)."""
+
+    def __init__(self, link):
+        self.link = link
+
+    def get(self, key, default=None):
+        return default
+
+
+class _TestFeed:
+    """A feedparser-shaped feed with a single (test) entry."""
+
+    def __init__(self, entries):
+        self.entries = entries
+
+
 async def fetch_working_feed(session: aiohttp.ClientSession, account: str):
+    # round 12 (backported from V3, 2026-09-17): every attempt is logged.
+    # Before this, a dead nitter fleet made the whole monitor a silent
+    # no-op (zero log lines).
     headers = {"User-Agent": "Mozilla/5.0"}
     for instance in RSS_INSTANCES:
         feed_url = f"{instance}/{account}/rss"
+        req_headers = headers
+        token_env = RSS_TOKEN_ENV.get(instance)
+        token = os.getenv(token_env, "").strip() if token_env else ""
+        if token:
+            # Token-gated instance (bot check): send the RSS token both as a
+            # Bearer header and a ?token= query param — a wrong/missing
+            # token just gets a challenge/403 answer, which is logged below
+            # and the chain moves on.
+            req_headers = {**headers, "Authorization": f"Bearer {token}"}
+            feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
         try:
-            async with session.get(feed_url, headers=headers,
+            async with session.get(feed_url, headers=req_headers,
                                    timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     content = await response.text()
                     feed = await asyncio.to_thread(feedparser.parse, content)
                     if feed.entries:
+                        logging.info(f"[{account}] feed OK via {instance} — "
+                                     f"{len(feed.entries)} entries.")
                         return feed
-        except Exception:
-            continue
+                    logging.info(f"[{account}] {instance}: HTTP 200 but 0 entries "
+                                 f"(bot check / stale instance?) — trying next.")
+                else:
+                    logging.info(f"[{account}] {instance}: HTTP {response.status} — "
+                                 f"trying next.")
+        except Exception as e:
+            logging.info(f"[{account}] {instance}: {type(e).__name__}: {e} — "
+                         f"trying next.")
+    logging.warning(f"[{account}] NO working nitter instance this run — "
+                    f"account skipped (see TEST_TWEET_ID to rebuild one tweet).")
     return None
 
 
@@ -676,10 +790,20 @@ async def fetch_tweet_details(session: aiohttp.ClientSession, account: str, twee
                               lang_suffix: str = "") -> dict | None:
     """
     Fetches tweet data from FxTwitter's API using the PLAIN-ID path
-    (/status/:id). The screen-name path (/<name>/status/:id) returns 404 for
-    reposts of other authors' tweets, X Articles, and some newer tweets —
-    verified live — while the plain-ID path resolves all of them. The true
-    author is read from the payload afterwards. lang_suffix: '/en' etc.
+    (/status/:id). The true author is read from the payload afterwards
+    (which is what round-13 repost detection relies on), so a REPOST
+    resolves to the ORIGINAL author, never the feed account.
+    lang_suffix: '/en' etc.
+
+    CORRECTED 2026-09-17: an earlier version of this comment claimed the
+    screen-name path (/<name>/status/:id) returns 404 for reposts of other
+    authors' tweets, X Articles and some newer tweets. Re-verified live on
+    2026-09-17 — that is NO LONGER TRUE. FxTwitter resolves purely by tweet
+    id and ignores the screen name in the path: api.fxtwitter.com/<anything>
+    /status/2099456877558202445 returns HTTP 200 with the correct @zeroartwo
+    payload, even for a screen name that does not exist. The plain-id path
+    is kept because it is the shortest form and cannot drift out of sync
+    with the payload's author — NOT because the other path 404s.
     """
     url = f"{FXTWITTER_API_BASE}/status/{tweet_id}{lang_suffix}"
     headers = {"User-Agent": "NewsFlashBot/3.0"}
@@ -724,7 +848,8 @@ def build_v2_payload(account: str, tweet: dict, read_post_url: str,
                      display_text: str | None = None, posted_ts: int | None = None,
                      gallery_items: list | None = None, media_notes: list | None = None,
                      quote_components: list | None = None, reply_line: str | None = None,
-                     lead_gallery_items: list | None = None) -> dict:
+                     lead_gallery_items: list | None = None,
+                     repost_account: str | None = None) -> dict:
     """Constructs the V2 layout; the action row sits OUTSIDE the container."""
     author = tweet.get("author", {}) or {}
     author_name = (author.get("name") or "").strip() or account
@@ -750,9 +875,22 @@ def build_v2_payload(account: str, tweet: dict, read_post_url: str,
     likes = tweet.get("likes", 0)
     views = tweet.get("views", "N/A")
 
-    inner_components = [
-        {"type": 10, "content": f"### [{author_name}](https://x.com/{screen_name}) just tweeted:"},
-    ]
+    if repost_account:
+        # round 13 (2026-09-17): repost — attribute the account that reposted
+        # it (screen name as the label, per 2026-09-17), and keep the true
+        # author visible on the line below.
+        inner_components = [
+            {"type": 10,
+             "content": (f"### [{repost_account} reposted]"
+                         f"(https://x.com/{repost_account})")},
+            {"type": 10,
+             "content": (f"-# 📌 Original: [{author_name} "
+                         f"(@{screen_name})](https://x.com/{screen_name})")},
+        ]
+    else:
+        inner_components = [
+            {"type": 10, "content": f"### [{author_name}](https://x.com/{screen_name}) just tweeted:"},
+        ]
     if reply_line:
         inner_components.append({"type": 10, "content": reply_line})
     if lead_gallery_items:  # ROUND 10: article cover, shown right under the header
@@ -799,14 +937,47 @@ async def main():
         feeds_tasks = [fetch_working_feed(session, acc) for acc in ACCOUNTS]
         feeds = await asyncio.gather(*feeds_tasks)
 
-        for account, feed in zip(ACCOUNTS, feeds):
+        feed_pairs = list(zip(ACCOUNTS, feeds))
+
+        # round 12 (backported from V3, 2026-09-17): TEST_TWEET_ID — rebuild
+        # ONE specific tweet WITHOUT the nitter feed (the nitter fleet was
+        # down/stale on 2026-09-17 and the monitor silently no-oped — see
+        # Wuthering_Waves/2100555373073797461). Format: screen_name/tweet_id
+        # (a full x.com status URL also works). It flows through the SAME
+        # pipeline below (data fallback chain, media, card, webhook) and the
+        # SAME cache — an already-posted tweet is skipped by the check further
+        # down, so it is safe to run even if a normal run posts it meanwhile.
+        test_tweet_id = os.getenv("TEST_TWEET_ID", "").strip()
+        if test_tweet_id:
+            t_account, t_id = parse_test_tweet_id(test_tweet_id)
+            if not t_account or not t_id:
+                logging.error(f"TEST_TWEET_ID malformed ({test_tweet_id!r}) — "
+                              f"expected screen_name/tweet_id or a full status "
+                              f"URL — ignored.")
+            else:
+                feed_pairs.append((t_account, _TestFeed([_TestFeedEntry(
+                    f"https://x.com/{t_account}/status/{t_id}")])))
+                logging.info(f"TEST TWEET: {t_account}/{t_id} — nitter feed "
+                             f"bypassed for this one tweet.")
+
+        if not any(feed and feed.entries for _, feed in feed_pairs):
+            logging.error("ALL FEEDS FAILED this run — no nitter instance "
+                          "answered for ANY account (per-instance lines "
+                          "above). Nothing to check — use TEST_TWEET_ID to "
+                          "rebuild a specific tweet.")
+
+        for account, feed in feed_pairs:
             if not feed or not feed.entries:
+                logging.info(f"[{account}] skipping — no feed / 0 entries.")
                 continue
             webhook_url = get_webhook_for_account(account)
             if not webhook_url:
+                logging.warning(f"[{account}] skipping — no webhook configured "
+                                f"(set WEBHOOK_{re.sub(r'[^A-Za-z0-9]', '_', account).upper()}"
+                                f" or DISCORD_WEBHOOK_URL).")
                 continue
             entries = [feed.entries[0]] if is_first_run else feed.entries
-            for entry in feed.entries:
+            for entry in entries:
                 match = re.search(r"/status/(\d+)", getattr(entry, "link", ""))
                 if not match:
                     continue
@@ -818,7 +989,17 @@ async def main():
                 published_parsed = entry.get("published_parsed")
                 rss_ts = time.mktime(published_parsed) if published_parsed else now
 
-                tweet_data = await fetch_tweet_details(session, account, tweet_id)
+                # ROUND 11 (backported from V3, 2026-09-17): 4-step tweet-data
+                # fallback chain — every result is normalized to the
+                # FxTwitter shape, so the card pipeline below is unchanged no
+                # matter which service answered (winner is logged: source=...).
+                if twitter_proxy is not None:
+                    tweet_data, tweet_source = await twitter_proxy.fetch_tweet_details_any(
+                        session, account, tweet_id, label=unique_key)
+                else:
+                    # legacy direct FxTwitter call (module file missing)
+                    tweet_data = await fetch_tweet_details(session, account, tweet_id)
+                    tweet_source = "fxtwitter"
                 if not tweet_data:
                     continue
 
@@ -826,6 +1007,18 @@ async def main():
                 author_data = tweet_data.get("author", {}) or {}
                 author_screen = author_data.get("screen_name") or account
                 read_post_url = f"https://fxtwitter.com/{author_screen}/status/{tweet_id}"
+
+                # round 13 (2026-09-17): repost detection. A nitter feed for
+                # an account contains only that account's own tweets and its
+                # reposts — so when the TRUE author from the payload differs
+                # from the feed account, this entry is a REPOST by the feed
+                # account. (FxEmbed's payload does carry a `reposted_by` field,
+                # but it is only populated when the RETWEET's own status id is
+                # queried — the nitter RSS links point at the ORIGINAL
+                # author's status, so the feed itself is the signal.)
+                repost_account = (account
+                                  if author_screen.lower() != account.lower()
+                                  else None)
                 status_page_url = f"https://x.com/{author_screen}/status/{tweet_id}"
                 display_text = None
 
@@ -839,7 +1032,10 @@ async def main():
                 # --- auto-translation for non-English tweets ---
                 # (articles: FxTwitter doesn't translate article bodies -> skip /en)
                 lang = (tweet_data.get("lang") or "").lower()
-                if lang and lang != "en" and not is_article:
+                # ROUND 11: /en is a FxTwitter feature — attempted only when
+                # the data really came from FxTwitter (backup services in the
+                # chain don't offer the /en endpoint).
+                if lang and lang != "en" and not is_article and tweet_source == "fxtwitter":
                     translated_data = await fetch_tweet_details(session, account, tweet_id,
                                                                 lang_suffix="/en")
                     if translated_data and translated_data.get("translation"):
@@ -910,12 +1106,13 @@ async def main():
                                            display_text=display_text, posted_ts=posted_ts,
                                            gallery_items=gallery_items, media_notes=media_notes,
                                            quote_components=quote_components, reply_line=reply_line,
-                                           lead_gallery_items=lead_gallery)
+                                           lead_gallery_items=lead_gallery,
+                                           repost_account=repost_account)
                 target_url = f"{webhook_url}?with_components=true"
                 async with session.post(target_url, json=payload) as resp:
                     if resp.status in (200, 204):
                         posted_urls.add(unique_key)
-                        logging.info(f"V2 Posted: {unique_key} (lang={lang or 'en'}{' | article' if is_article else ''})")
+                        logging.info(f"V2 Posted: {unique_key} (lang={lang or 'en'}{' | article' if is_article else ''} | source={tweet_source})")
                         await asyncio.sleep(1.5)
                     else:
                         body = await resp.text()
