@@ -655,6 +655,11 @@ credits, no API key):
 * Note: Arctic's score/comment counts are stale for ~36 h after a post —
   archive-sourced cards don't present those as live stats (same rule as the
   existing crosspost-original path).
+* **Round 18 follow-up (same day, from the live run):** the archive also
+  carries posts the moderators soft-removed or the author deleted (a
+  removal-notice body instead of content). Those are now detected and
+  skipped — not posted and not cached — so they post normally once
+  approved.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1194,6 +1199,25 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 18 (Reddit V3): soft-removed / deleted post filter**
+  (follow-up to the round-17 live run):
+  * The archive (and occasionally RSS) still carries posts the moderators
+    soft-removed or the author deleted, with a removal-notice body —
+    `"[deleted]"`, `"[removed]"`, `"**[ Removed by moderator ]**"`,
+    `"Sorry, this post has been removed by the moderators of r/…"`,
+    `"Sorry, this post was deleted by the person who originally posted
+    it"`. These are now detected and **skipped** (round 17's first live
+    run posted a few such cards, which had to be deleted from the channels
+    manually).
+  * Skipped posts are **not added to the dedup cache** — if a post is
+    approved later it surfaces again (RSS or archive) and posts normally.
+  * Explicit `TEST_POST_ID` rebuilds are unaffected; every skip is logged:
+    `[<sub>_<id>] post appears removed/deleted (<reason>) — skipping, not
+    cached (will post once approved).`
+  * Smoke test: 9 new detection checks (`tests/test_smoke.py` — 208 total).
+  * Nothing else changed: RSS, proxies, FULL MODE, YouTube, crossposts and
+    the round-17 archive backup all run exactly as before.
 
 * **2026-09-17 — round 11 (X V3) + round 17 (Reddit V3): tweet-data
   fallback chain, GIF chain restructure, Arctic Shift search backup:**

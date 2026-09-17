@@ -1045,6 +1045,33 @@ check("r17 entry: crosspost permalink detected (original path)",
       str(v3.find_crosspost_original_path(cp_entry.get("content")[0]["value"], e.link)))
 check("r17 entry: .get default like feedparser", e.get("nope") is None)
 
+# ---- round 18: soft-removed/deleted post detection (v3) -------------------
+check("r18 removed: [deleted] body",
+      v3.removed_post_reason("Real title", "[deleted]") == "whole-body marker")
+check("r18 removed: [removed] body",
+      v3.removed_post_reason("Real title", "[removed]") == "whole-body marker")
+check("r18 removed: bolded [ Removed by moderator ]",
+      v3.removed_post_reason("Real title", "**[ Removed by moderator ]**") == "whole-body marker")
+check("r18 removed: [deleted] title",
+      v3.removed_post_reason("[deleted]", "some body") == "title marker")
+check("r18 removed: moderators notice (live example)",
+      v3.removed_post_reason("T",
+                             "Sorry, this post has been removed by the moderators of r/HonkaiStarRail_leaks.")
+      == "removal notice")
+check("r18 removed: author-deleted notice",
+      v3.removed_post_reason("T",
+                             "Sorry, this post was deleted by the person who originally posted it.")
+      == "removal notice")
+check("r18 removed: real title + deleted body (live example)",
+      v3.removed_post_reason("Version 7.1 New Weapon Overview",
+                             "**Version 7.1 New Weapon Overview** "
+                             "Sorry, this post was deleted by the person who originally posted it.")
+      == "removal notice")
+check("r18 kept: empty body is NOT removed (link posts)",
+      v3.removed_post_reason("Link post", "") is None)
+check("r18 kept: normal body mentioning a pull",
+      v3.removed_post_reason("T", "The previous leak was pulled. Here is the new build list...") is None)
+
 asyncio.run(round15_flows())
 asyncio.run(round15_fetch())
 

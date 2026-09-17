@@ -121,6 +121,16 @@
 #       as feedparser-style entries and run through the SAME collect()
 #       (dedup + 48h window unchanged); soft-fail on any error; shares the
 #       3-strike circuit breaker with the crosspost archive lookup.
+#   15. (round 18, 2026-09-17) SOFT-REMOVED / DELETED POST FILTER: posts the
+#       moderators soft-removed or the author deleted — the archive (and
+#       occasionally RSS) still carries them with a removal-notice body:
+#       "[deleted]", "[removed]", "[ Removed by moderator ]", "Sorry, this
+#       post has been removed by the moderators of r/...", "Sorry, this
+#       post was deleted by the person who originally posted it" — are
+#       detected, skipped and NOT added to the dedup cache: if the post is
+#       approved later it surfaces again and posts normally. Explicit TEST
+#       POST rebuilds are unaffected. (Follow-up to the round-17 live run,
+#       which posted a few removal-notice cards.)
 #
 # ■ WORKFLOW: identical to V1/V2. Test-area first:
 #   run: python "testing area/reddit_main_v3.py"
@@ -562,6 +572,51 @@ def _clean_post_title(value) -> str:
     # Only the observed appended byline artifact, not legitimate title punctuation.
     title = re.sub(r"\]\(https?://[^\n]*\)\s*\n\*?by.*$", "", title, flags=re.S)
     return re.sub(r"\s+", " ", title)[:400]
+
+
+# ---------------------------------------------------------------------------
+# ■ ROUND 18 (2026-09-17): SOFT-REMOVED / DELETED POST DETECTION
+# The Arctic Shift archive (round 17) — and occasionally the RSS feed —
+# still carries posts the moderators soft-removed or the author deleted.
+# Their pages show a removal notice instead of the real content. Such
+# posts are skipped (not posted) and NOT cached, so a post that gets
+# approved later is caught and posted normally.
+# ---------------------------------------------------------------------------
+_REMOVED_TITLE_RE = re.compile(r"^\s*\*{0,2}\[ ?(?:removed|deleted) ?\]\*{0,2}\s*$", re.I)
+_REMOVED_WHOLE_BODY_RE = re.compile(
+    r"^\*{0,2}\[ ?(?:deleted|removed) ?\]\*{0,2}$"
+    r"|^\*{0,2}\[ ?removed ?by ?moderator ?\]\*{0,2}$", re.I)
+_REMOVED_NOTICE_RES = (
+    (re.compile(r"sorry,? (?:this|the) post (?:has been|was) (?:removed|deleted)", re.I), "removal notice"),
+    (re.compile(r"\[ ?removed ?by ?moderator ?\]", re.I), "removed by moderator"),
+    (re.compile(r"removed by (?:the )?moderators?", re.I), "removed by moderators"),
+    (re.compile(r"(?:was|has been) deleted by the person who originally posted it", re.I), "deleted by author"),
+)
+
+
+def removed_post_reason(title: str | None, body: str | None) -> str | None:
+    """Returns a short reason when the post looks soft-removed or deleted
+    (still pending approval), else None. Observed notices (2026-09-17 live
+    run): "[deleted]", "[removed]", "**[ Removed by moderator ]**",
+    "Sorry, this post has been removed by the moderators of r/...",
+    "Sorry, this post was deleted by the person who originally posted it".
+    Only the first 400 chars of the body are inspected — a legitimate post
+    that merely mentions a deletion later in its text must not be caught.
+    An EMPTY body is NOT treated as removed (legitimate image/link posts
+    have empty bodies)."""
+    t = str(title or "").strip()
+    if _REMOVED_TITLE_RE.match(t):
+        return "title marker"
+    b = re.sub(r"\s+", " ", str(body or "")).strip()
+    if not b:
+        return None
+    if len(b) <= 80 and _REMOVED_WHOLE_BODY_RE.match(b):
+        return "whole-body marker"
+    head = b[:400]
+    for rx, reason in _REMOVED_NOTICE_RES:
+        if rx.search(head):
+            return reason
+    return None
 
 
 def _clean_plain_body(text) -> str:
@@ -2236,6 +2291,24 @@ async def main():
                                       f"build the test post. Add REDDIT_CLIENT_ID/"
                                       f"SECRET secrets for reliable testing.")
                         continue
+
+            # ---- round 18: skip soft-removed / deleted / pending-approval
+            # posts. The archive (round 17) and occasionally the RSS feed
+            # still carries posts the moderators removed or the author
+            # deleted — their pages show a removal notice instead of the
+            # real content. They are NOT posted and NOT added to the dedup
+            # cache: if the post is approved later it surfaces again and
+            # posts normally. Explicit TEST POST rebuilds are unaffected.
+            if not TEST_POST_ID:
+                _r_title = str((post_json or {}).get("title") or base.get("title") or "")
+                _r_body = (strip_html(str((post_json or {}).get("selftext") or ""))
+                           or str(base.get("body") or ""))
+                _removed = removed_post_reason(_r_title, _r_body)
+                if _removed:
+                    logging.info(f"[{unique_key}] post appears removed/deleted "
+                                 f"({_removed}) — skipping, not cached (will post "
+                                 f"once approved).")
+                    continue
 
             try:
                 data = await resolve_post_media(session, base, post_json,
