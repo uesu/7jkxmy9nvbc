@@ -17,7 +17,7 @@ please support them:
 | Project / Service | What it's used for | Links |
 |---|---|---|
 | **News-Flash-Bot** by [@cold-logic5](https://github.com/cold-logic5) | The original repository this project is based on (RSS → Discord webhook architecture) | [GitHub repo](https://github.com/cold-logic5/News-Flash-Bot) · [Author](https://github.com/cold-logic5) |
-| **Nitter** by [@zedeus](https://github.com/zedeus) | Free & open-source, privacy-focused X/Twitter front-end providing the RSS feeds | [GitHub](https://github.com/zedeus/nitter) · [nitter.net](https://nitter.net/) · [nitter.perennialte.ch](https://nitter.perennialte.ch/) · [xcancel.com](https://xcancel.com/) · 💖 [Donations](https://github.com/zedeus/nitter#donations) |
+| **Nitter** by [@zedeus](https://github.com/zedeus) | Free & open-source, privacy-focused X/Twitter front-end providing the RSS feeds | [GitHub](https://github.com/zedeus/nitter) · [status.d420.de instance tracker](https://status.d420.de/) · [nitter.jaydenha.uk](https://nitter.jaydenha.uk/) · [nitter.meowing.monster](https://nitter.meowing.monster/) · [nitter.click](https://nitter.click/) · [nitter.xitter.cc](https://nitter.xitter.cc/) · [nitter.miningtcup.me](https://nitter.miningtcup.me/) (RSS token) · [nitter.netbub.com](https://nitter.netbub.com/) · [shitter.thepixora.com](https://shitter.thepixora.com/) · [nitter.perennialte.ch](https://nitter.perennialte.ch/) · [nitter.privacydev.net](https://nitter.privacydev.net/) · [nitter.net](https://nitter.net/) · [xcancel.com](https://xcancel.com/) · 💖 [Donations](https://github.com/zedeus/nitter#donations) |
 | **FxTwitter / FxEmbed** by [@dangered wolf](https://github.com/dangeredwolf) | Rich X/Twitter embeds (auto-unfurl) + the free API — **primary tweet-data source** (round 11; its same-engine sister client **fixupx.com** is the stand-by host) used for media, stats, translation, GIF re-rendering and the video proxy | [fxtwitter.com](https://fxtwitter.com) · [docs.fxembed.com](https://docs.fxembed.com/) · [FxEmbed GitHub](https://github.com/FxEmbed/FxEmbed) · [GitHub](https://github.com/dangeredwolf) · 💖 [Sponsor dangered wolf](https://github.com/sponsors/dangeredwolf) |
 | **vxtwitter (BetterTwitFix / fixvx)** | **Backup tweet-data API** (round 11, 3rd in the fallback chain — multi-photo tweets arrive as separate photos via its API) + its **gifconvert** GIF converter (round 11) | [vxtwitter.com](https://vxtwitter.com) · [API docs](https://vxtwitter.com/api.md) |
 | **EmbedEZ** | Rich Reddit embeds (redditez.com mirror) + the provider API used by Reddit V2 + **last-resort tweet-data source** behind twitterez.com (round 11) | [embedez.com](https://embedez.com/) · [redditez.com](https://embedez.com/reddit) · [twitterez.com](https://twitterez.com) · [API docs](https://embedez.com/docs) |
@@ -76,8 +76,9 @@ and to [@dangered wolf](https://github.com/dangeredwolf), creator and lead devel
   posts approved from a subreddit's moderator queue hours (or a day) later still get posted —
   they're never left out.
 - 📊 **Stats line** — replies/retweets/likes/views (X) or comments/shares/likes/views (Reddit V2).
-- 🕙 **Reliable 10-minute automation** via an external cron trigger (GitHub's built-in `schedule` is
-  kept only as a backup — it's documented as best-effort and can lag or be skipped).
+- 🕙 **Reliable 10-minute automation** via an external cron trigger (cron-job.org is the single
+  scheduler since round 12 — the in-file GitHub `schedule:` is disabled because it raced the
+  external trigger; re-enable = uncomment two lines + pause the cron-job.org job).
 - 💾 **Self-maintaining memory** — posted IDs are cached in JSON files committed back to the repo by
   `github-actions[bot]`, so nothing is ever posted twice.
 
@@ -369,6 +370,68 @@ Fixes and formats added after real feed runs:
 * **Reddit V3 got its matching backup the same round** — see the round-17
   section under the Reddit monitor.
 
+## 🆕 X V2/V3 — round 12 (2026-09-17): nitter fleet resilience + visible failures + TEST_TWEET_ID
+
+**What broke:** on 2026-09-17 every nitter instance the monitor knew about
+was dead or stale (nitter.net / nitter.privacydev.net returned HTTP 500,
+xcancel.com was suspended 2026-09-14, nitter.perennialte.ch served a stale
+feed) — and the old `fetch_working_feed` logged **nothing** on that path, so
+the monitor silently no-oped and missed tweets (e.g.
+`Wuthering_Waves/2100555373073797461`, the EP3.7 song-credit post) with zero
+log lines to explain why.
+
+**What round 12 does:**
+
+1. **Every feed attempt is logged** — per instance: `feed OK via … — N
+   entries`, `HTTP 500 — trying next`, `HTTP 200 but 0 entries (bot check /
+   stale instance?) — trying next`, or the exception name; if no instance
+   works: `NO working nitter instance this run — account skipped`; if no
+   account gets a feed at all: `ALL FEEDS FAILED this run` (ERROR level). A
+   dead fleet can never be invisible again.
+2. **The RSS fleet now covers the WHOLE tracked fleet — 11 instances**
+   (status.d420.de tracker + live plain-RSS probes, 2026-09-17), ordered by
+   today's evidence because the tracker's health/RSS flags flip back and
+   forth from day to day: `jaydenha.uk` + `meowing.monster` (both verified
+   fresh by probe) → `click` / `xitter.cc` (RSS "disabled" at probe time —
+   kept, flags flip) → `miningtcup.me` (healthy, RSS **token-gated** — see
+   3.) → `netbub` (unreachable) → `thepixora` (alive, behind a dog-captcha
+   bot check) → `perennialte.ch` (stale RSS) → `privacydev.net` /
+   `nitter.net` (500'd) → `xcancel.com` (suspended — kept: auto-revives in
+   the chain if it returns). The chain stops at the first instance that
+   answers with real entries, so a dead one in the list costs at most a
+   logged line.
+3. **RSS token support for `nitter.miningtcup.me`** (bot check). A token
+   request was emailed to `nitter-rss@miningtcup.me`. **When the token
+   arrives:**
+   * **Repo → Settings → Secrets and variables → Actions → Variables →
+     New repository variable** → name **`NITTER_RSS_TOKEN`**, value = the
+     token from the email.
+   * That's it. The workflow already wires
+     `NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}` and the script reads
+     it at call time — the **next cron-job.org run** picks it up
+     automatically (no code change, no re-deploy). The token is sent BOTH as
+     an `Authorization: Bearer` header and a `?token=` query param, so
+     either token convention the instance uses works. Until then the chain
+     simply logs the bot-check answer for that instance and moves on.
+4. **`TEST_TWEET_ID` recovery net** — the workflow's *Run workflow* panel has
+   an optional **test_tweet** input. Fill it with `screen_name/tweet_id`
+   (a full x.com status URL also works) to rebuild ONE specific tweet
+   through the same pipeline + cache, bypassing nitter entirely (FxTwitter
+   direct). Example: `Wuthering_Waves/2100555373073797461`. Already-posted
+   tweets are skipped by the cache, so it's safe to re-run.
+5. **GitHub's native `schedule:` is now disabled** in BOTH monitor
+   workflows (commented out with a re-enable note). cron-job.org is the
+   single scheduler — the native schedule had raced it (2026-09-17
+   `WutheringWavesLeaks_1wis2u5` double post: both checked out the same
+   pre-cache commit, both posted, the 2nd cache push was rejected). To
+   re-enable: uncomment the two `schedule:` lines AND pause the cron-job.org
+   job.
+
+**Catch-up:** with the fleet refreshed, the next cron-job.org run
+automatically posts the missed 2026-09-17 tweets (WW song credits + video,
+the 08:00 wallpaper, the TYPEII_EN repost of @zeroartwo, and the Ananta_EN
+11:37 giveaway-winner announcement) — no manual action needed.
+
 ## 🌐 How translation works (all versions)
 
 1. The script fetches the tweet from the FxTwitter API and reads its `lang` field.
@@ -405,9 +468,17 @@ Every account in `ACCOUNTS` is routed to its own webhook secret:
 name: Twitter Feed Monitor
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'   # backup only — GitHub cron is best-effort
+  # ── GITHUB NATIVE SCHEDULE: DISABLED (round 12, 2026-09-17) ────────────────
+  # It raced the cron-job.org trigger (double post, 2026-09-17). To re-enable:
+  # uncomment these two lines AND pause the cron-job.org job:
+  #   schedule:
+  #     - cron: '*/10 * * * *'
   workflow_dispatch:          # allows manual + external-cron triggering
+    inputs:
+      test_tweet:
+        description: 'Optional: rebuild ONE specific tweet, e.g. Wuthering_Waves/2100555373073797461 (nitter bypassed). Leave empty for a normal run.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -439,6 +510,12 @@ jobs:
           WEBHOOK_WUTHERING_WAVES: ${{ secrets.WEBHOOK_WUTHERING_WAVES }}
           WEBHOOK_HONKAINA: ${{ secrets.WEBHOOK_HONKAINA }}
           WEBHOOK_ANANTA_EN: ${{ secrets.WEBHOOK_ANANTA_EN }}
+          # Test tools (round 12): TEST_TWEET_ID rebuilds one tweet nitter-free
+          # (manual runs only); NITTER_RSS_TOKEN feeds the token-gated
+          # nitter.miningtcup.me instance (repo variable — set when the
+          # emailed token arrives).
+          TEST_TWEET_ID: ${{ github.event.inputs.test_tweet }}
+          NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}
         # While testing a new version, point this line at the test copy instead
         # (QUOTES REQUIRED — the folder name has a space):
         #   run: python "testing area/main_v3test.py"
@@ -1099,7 +1176,12 @@ author's "Manually run by …" pattern with a free external cron:
 3. **Perform test run** → expect `204 No Content` (or `200 OK`), then check the Actions tab for a run
    labeled *Manually run by you*. `401` = bad token/scope; `404` = wrong repo/workflow/branch name.
 
-Keep the in-file `schedule:` cron as a harmless backup — occasional extra *Scheduled* runs are fine.
+⚠️ **Round 12 (2026-09-17): the in-file `schedule:` is now DISABLED — do not
+re-add it while cron-job.org runs.** It raced the external trigger (same
+pre-cache commit checked out twice → the same post went out twice and the
+2nd cache push was rejected, 2026-09-17). Both monitor workflows ship with
+the `schedule:` lines commented out + a re-enable note; to re-enable,
+uncomment the two lines **and** pause the cron-job.org job.
 
 ## Step 5 — Test end-to-end
 
@@ -1158,9 +1240,17 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 * **Buttons don't render.** Every webhook POST must use the query param `?with_components=true` —
   Discord *silently drops* components without it (already handled in all scripts; don't remove it).
   Rich-card versions also set the `IS_COMPONENTS_V2` flag (`1 << 15`).
-* **`Could not fetch valid RSS feed for @…` / `r/…`** — public mirrors rotate/die. For X, swap
-  `RSS_INSTANCES` with currently-live Nitter mirrors; for Reddit, see the *Reddit V1 fix* section and
-  read the new per-source log lines.
+* **An X run logs `… — trying next` for every instance / `NO working nitter
+  instance this run` / `ALL FEEDS FAILED this run`** — the whole nitter
+  fleet was down/stale (it happened 2026-09-17: the monitor missed tweets
+  with zero log lines until round 12 made the path visible). Check
+  [status.d420.de](https://status.d420.de/) and refresh `RSS_INSTANCES` in
+  `testing area/twitter_v3.py` (verified-fresh first); for a token-gated
+  instance set the `NITTER_RSS_TOKEN` variable (round-12 section above). To
+  rebuild one specific missed tweet meanwhile: *Run workflow* →
+  `test_tweet` = `screen_name/tweet_id`.
+* **`Could not fetch valid RSS feed for @…` / `r/…`** — public mirrors rotate/die. For Reddit, see
+  the *Reddit V1 fix* section and read the new per-source log lines.
 * **`HTTP 429 for r/…` lines in a Reddit run** — Reddit's anonymous datacenter rate limit
   (~1 request/minute per IP since June 2026). Round 9 makes the primary fetch a **single combined
   request** for all subreddits, which normally fits the limit; in fallback mode the script retries
@@ -1177,8 +1267,11 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
   [`docs/DEPENDABOT.md`](docs/DEPENDABOT.md). Cosmetic either way; your
   Python scripts are unaffected.
 * **No run at 10-minute marks** — GitHub's native cron is best-effort; that's why the external
-  cron-job.org trigger exists. Also note GitHub auto-disables `schedule:` after 60 days of repo
-  inactivity — the cache auto-commits usually count as activity, and the external trigger is immune.
+  cron-job.org trigger exists. Round 12 (2026-09-17): the in-file `schedule:` is disabled in both
+  monitor workflows — cron-job.org is the single scheduler (the two had
+  raced: same pre-cache commit → double post, 2026-09-17). Also note GitHub
+  auto-disables `schedule:` after 60 days of repo inactivity — the cache
+  auto-commits usually count as activity, and the external trigger is immune.
 * **Reddit V2 posts "Limited preview" cards** — your `EMBEDEZ_API_KEY` is missing/invalid or out of
   credits; add a valid key (and watch the credit balance), or switch to free V1.
 * **First run posts only one item per account** — intentional anti-flood behavior; normal backfill
@@ -1228,6 +1321,29 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 12 (X V3): nitter fleet resilience + visible failures
+  + TEST_TWEET_ID + RSS-token support** (the X monitor silently no-oped on
+  2026-09-17 — every known nitter instance was dead/stale and that path
+  logged nothing; missed tweets included
+  `Wuthering_Waves/2100555373073797461`):
+  * Every nitter attempt is now logged per instance; `NO working nitter
+    instance` / `ALL FEEDS FAILED this run` make a dead fleet loud.
+  * `RSS_INSTANCES` expanded to the WHOLE tracked fleet — 11 instances,
+    ordered by live 2026-09-17 probes (`jaydenha.uk` + `meowing.monster`
+    verified fresh first; `xcancel.com` suspended but kept, auto-revives if
+    it returns).
+  * RSS-token support: `nitter.miningtcup.me` is behind a bot check — set
+    the emailed token as repo variable `NITTER_RSS_TOKEN` (sent as Bearer
+    header + `?token=`) and the next run picks it up, no code change.
+  * `TEST_TWEET_ID` / workflow `test_tweet` input: rebuild ONE specific
+    tweet nitter-free through the same pipeline + cache.
+  * GitHub's native `schedule:` disabled in both monitor workflows
+    (cron-job.org = single scheduler — the race caused the 2026-09-17
+    `1wis2u5` double post), with a re-enable note.
+  * Next cron-job.org run auto-posts the 2026-09-17 catch-up: WW song
+    credits (video) + 08:00 wallpaper, TYPEII_EN's @zeroartwo repost,
+    Ananta_EN 11:37 giveaway-winner announcement.
 
 * **2026-09-17 — round 22 (Reddit V3): clean auto-linked links stay raw**
   (same-day follow-up — the 1whe2tr re-test ON THE NEW CODE still showed
