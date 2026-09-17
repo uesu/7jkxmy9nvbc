@@ -448,16 +448,16 @@ for module in (v3, proxy):
     cleaner = module.clean_rss_body if module is v3 else module.clean_proxy_body
     check("r15 valid standalone markdown retained",
           cleaner("[Spotify](https://example.com/music)") == "[Spotify](https://example.com/music)")
-    check("r15 URL-labelled markdown retained",
-          cleaner("[https://example.com](https://example.com)") == "[https://example.com](https://example.com)")
+    check("r15 URL-labelled markdown -> bare URL (round 22)",
+          cleaner("[https://example.com](https://example.com)") == "https://example.com")
     check("r15 legitimate submitted-by prose retained",
           cleaner("This was submitted by a musician.") == "This was submitted by a musician.")
     check("r15 punctuation repair", cleaner("Buff](https://example.com)\nBuff): TBD") == "Buff: TBD")
-    check("r15 cascade repair", cleaner(
+    check("r15 cascade repair (round 22: raw bare URLs)", cleaner(
         "Firefly](https://example.com/previous)\nFirefly) video [https://b23.tv/aaa\n"
         "Feixiao](https://b23.tv/aaa)\nFeixiao) video [https://b23.tv/bbb") ==
-        "Firefly video [https://b23.tv/aaa](https://b23.tv/aaa)\n"
-        "Feixiao video [https://b23.tv/bbb](https://b23.tv/bbb)")
+        "Firefly video https://b23.tv/aaa\n"
+        "Feixiao video https://b23.tv/bbb")
     check("r15 footer repair", cleaner(
         "[ ](https://reddit.com/post)\nsubmitted](https://reddit.com/post)\n"
         "submitted) by [ /u/name_ ](https://reddit.com/u/name_) to [r/sub](https://reddit.com/r/sub)") == "")
@@ -1102,10 +1102,34 @@ check("r20 link: deep nested mangle -> one plain line, bare URL once",
       v3.clean_rss_body(_r20_deep)
       == "Firefly video https://b23.tv/dkCXgES",
       v3.clean_rss_body(_r20_deep))
-check("r20 kept: a single clean link line is untouched",
+check("r22 link: the 1whe2tr auto-linked face -> 3 raw plain lines (v3)",
+      v3.clean_rss_body("Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                        "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                        "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
+      == _r20_expected,
+      v3.clean_rss_body("Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                        "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                        "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)"))
+check("r22 link: same auto-linked face via the proxy cleaner",
+      proxy.clean_proxy_body("Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                             "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                             "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
+      == _r20_expected,
+      proxy.clean_proxy_body("Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                             "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                             "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)"))
+check("r22 link: clean auto-linked label line -> one raw line",
       v3.clean_rss_body("Firefly video [https://b23.tv/x](https://b23.tv/x)")
-      == "Firefly video [https://b23.tv/x](https://b23.tv/x)",
+      == "Firefly video https://b23.tv/x",
       v3.clean_rss_body("Firefly video [https://b23.tv/x](https://b23.tv/x)"))
+check("r22 kept: descriptive link (text != URL) untouched",
+      v3.clean_rss_body("BGM: [Heist](https://en.wikipedia.org/wiki/Heist)")
+      == "BGM: [Heist](https://en.wikipedia.org/wiki/Heist)",
+      v3.clean_rss_body("BGM: [Heist](https://en.wikipedia.org/wiki/Heist)"))
+check("r22 kept: prose with repeated bare URL + URL-labelled link untouched",
+      v3.clean_rss_body("mirror: https://x.com/a again [https://x.com/a](https://x.com/a)")
+      == "mirror: https://x.com/a again [https://x.com/a](https://x.com/a)",
+      v3.clean_rss_body("mirror: https://x.com/a again [https://x.com/a](https://x.com/a)"))
 check("r21 link: clean label + bare URL pair -> one raw line",
       v3.clean_rss_body("Firefly video\nhttps://b23.tv/dkCXgES\n\n"
                         "Feixiao video\nhttps://b23.tv/XojBeMr")
@@ -1124,9 +1148,9 @@ check("r21 kept: two bare URL lines stay separate",
       v3.clean_rss_body("https://a.tv/x\nhttps://b.tv/y")
       == "https://a.tv/x\nhttps://b.tv/y",
       v3.clean_rss_body("https://a.tv/x\nhttps://b.tv/y"))
-check("r21 kept: label with its own link is not merged",
+check("r21 kept: label with its own link -> raw, NOT merged with the next URL line",
       v3.clean_rss_body("Demo [https://a.com](https://a.com)\nhttps://b.tv/x")
-      == "Demo [https://a.com](https://a.com)\nhttps://b.tv/x",
+      == "Demo https://a.com\nhttps://b.tv/x",
       v3.clean_rss_body("Demo [https://a.com](https://a.com)\nhttps://b.tv/x"))
 check("r20 kept: mangled body is NOT treated as removed (1whe2tr)",
       v3.removed_post_reason("4.6 Event Firefly, Feixiao and The Herta gameplay",
