@@ -15,7 +15,7 @@
 | Piece | What it is | What it runs |
 |---|---|---|
 | `.github/workflows/ci.yml` | A GitHub Actions workflow that triggers on **every push and PR** (public repo = free) | 3 steps: `pip install -r requirements.txt` → `python -m compileall` over every script → `python tests/test_smoke.py` |
-| `tests/test_smoke.py` | An **offline** test (no network, no secrets, no Discord): every monitor script must **import cleanly**, and the Reddit V3 card pipeline must still behave (body cleaning, media extraction/dedup, i.redd.it swap, redlib scoping, OP comment, components-v2 layout, buttons, proxy-service parsers) | `python tests/test_smoke.py` — prints `PASS`/`FAIL` per check, exits non-zero on any failure |
+| `tests/test_smoke.py` | An **offline** test (no network, no secrets, no Discord): every monitor script must **import cleanly**, the Reddit V3 card pipeline must still behave (body cleaning, media extraction/dedup, i.redd.it swap, redlib scoping, OP comment, components-v2 layout, buttons, proxy-service parsers, Arctic search backup — round 17), and the X V3 tweet-data path must still behave (GIF converter chain, vxtwitter normalization incl. multi-photo, twitterez og-page parsing, fallback-chain order — round 11) | `python tests/test_smoke.py` — prints `PASS`/`FAIL` per check, exits non-zero on any failure |
 
 ## 2. Optional or required? — **Required (for how this repo is set up)**
 
@@ -33,10 +33,11 @@
 * **Offline by design** — it must run on GitHub runners and on any machine
   without the real environment: `aiohttp`, `feedparser` and `dotenv` are
   stubbed if not installed, and no check opens a connection.
-* **Import gate for every engine** — all nine monitor scripts
-  (`main.py`, the X V2/V3 test copies, Reddit V1/V2/V3, `video_diag.py`)
-  must import without error. This is the check that fails on a mangled
-  paste or a breaking dependency bump.
+* **Import gate for every engine** — all ten monitor scripts
+  (`main.py`, the X V2/V3 test copies + the `twitter_proxy.py` fallback
+  module, Reddit V1/V2/V3, `video_diag.py`) must import without error.
+  This is the check that fails on a mangled paste or a breaking dependency
+  bump.
 * **Pipeline checks** — the Reddit V3 card logic is exercised with fixtures
   (body cleaning, media dedup/best-rendition, i.redd.it swap, redlib
   post-area scoping, test-post native base, OP comment selection,
