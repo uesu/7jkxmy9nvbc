@@ -1,0 +1,62 @@
+name: Reddit Feed Monitor
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # backup only — GitHub cron is best-effort
+  workflow_dispatch:          # allows manual + external-cron triggering
+
+permissions:
+  contents: write
+
+jobs:
+  check-reddit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Reddit Feed Monitor
+        env:
+          SUBREDDITS: ${{ secrets.SUBREDDITS }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          EMBEDEZ_API_KEY: ${{ secrets.EMBEDEZ_API_KEY }}
+          REDDIT_FEED_TOKEN: ${{ secrets.REDDIT_FEED_TOKEN }}   # your Reddit feed token (recommended — old.reddit.com -> Preferences -> Feeds)
+          WEBHOOK_REDDIT_ZENLESSZONEZEROLEAKS_: ${{ secrets.WEBHOOK_REDDIT_ZENLESSZONEZEROLEAKS_ }}
+          WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS: ${{ secrets.WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS }}
+          WEBHOOK_REDDIT_HONKAISTARRAIL_LEAKS: ${{ secrets.WEBHOOK_REDDIT_HONKAISTARRAIL_LEAKS }}
+          WEBHOOK_REDDIT_WUTHERINGWAVESLEAKS: ${{ secrets.WEBHOOK_REDDIT_WUTHERINGWAVESLEAKS }}
+          WEBHOOK_REDDIT_HONKAINEXUSANIMALEAKS: ${{ secrets.WEBHOOK_REDDIT_HONKAINEXUSANIMALEAKS }}
+          WEBHOOK_REDDIT_ANANTALEAKS: ${{ secrets.WEBHOOK_REDDIT_ANANTALEAKS }}
+          REDDIT_MIRROR: ${{ vars.REDDIT_MIRROR }}   # optional (V1): blank/omitted = redditez.com
+        # ───────────────────────────────────────────────────────────────────
+        # TESTING AREA (how updates ship):
+        # • A new/changed script lives in "testing area/" FIRST (e.g.
+        #   reddit_maintest.py). Point this line at the test copy — THE
+        #   QUOTES ARE REQUIRED (the folder name contains a space):
+        #       run: python "testing area/reddit_maintest.py"
+        # • Check BOTH the Discord post(s) AND this workflow's log.
+        # • Once the test copy passes, copy it over the production file and
+        #   point this line back:
+        #       run: python reddit_main.py      <- plain V1 (free)
+        #       run: python reddit_main_v2.py   <- rich card (EmbedEZ key)
+        #       run: python reddit_main_v3.py   <- rich card (No API)
+        # ───────────────────────────────────────────────────────────────────
+        run: python "testing area/reddit_main.py"   # ← switch to reddit_main_v2.py for the rich card
+
+      - name: Commit and push updated posted_reddit.json cache
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -f posted_reddit.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update posted_reddit.json cache" && git push)

@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  check-rss:
+  check-twitter:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
