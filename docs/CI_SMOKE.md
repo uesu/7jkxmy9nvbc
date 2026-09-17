@@ -15,7 +15,7 @@
 | Piece | What it is | What it runs |
 |---|---|---|
 | `.github/workflows/ci.yml` | A GitHub Actions workflow that triggers on **every push and PR** (public repo = free) | 3 steps: `pip install -r requirements.txt` → `python -m compileall` over every script → `python tests/test_smoke.py` |
-| `tests/test_smoke.py` | An **offline** test (no network, no secrets, no Discord): every monitor script must **import cleanly**, the Reddit V3 card pipeline must still behave (body cleaning, media extraction/dedup, i.redd.it swap, redlib scoping, OP comment, components-v2 layout, buttons, proxy-service parsers, Arctic search backup — round 17, soft-removed post filter — round 18), and the X V3 tweet-data path must still behave (GIF converter chain, vxtwitter normalization incl. multi-photo, twitterez og-page parsing, fallback-chain order — round 11) | `python tests/test_smoke.py` — prints `PASS`/`FAIL` per check, exits non-zero on any failure |
+| `tests/test_smoke.py` | An **offline** test (no network, no secrets, no Discord): every monitor script must **import cleanly**, the Reddit V3 card pipeline must still behave (body cleaning, media extraction/dedup, i.redd.it swap, redlib scoping, OP comment, components-v2 layout, buttons, proxy-service parsers, Arctic search backup — round 17, soft-removed post filter — round 18, label+URL link mangle repair — round 19), and the X V3 tweet-data path must still behave (GIF converter chain, vxtwitter normalization incl. multi-photo, twitterez og-page parsing, fallback-chain order — round 11) | `python tests/test_smoke.py` — prints `PASS`/`FAIL` per check, exits non-zero on any failure |
 
 ## 2. Optional or required? — **Required (for how this repo is set up)**
 

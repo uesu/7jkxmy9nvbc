@@ -660,6 +660,12 @@ credits, no API key):
   removal-notice body instead of content). Those are now detected and
   skipped — not posted and not cached — so they post normally once
   approved.
+* **Round 19 follow-up (same day, from the live run — post 1whe2tr):**
+  the feed's auto-linker mangled "label line + bare URL" bodies
+  (`Firefly video` / `https://b23.tv/…` pairs) into nested `[[U](U)…](U](U)…`
+  garbage. A new pre-pass in BOTH body cleaners (RSS + proxy) repairs the
+  family to one label line + one clickable URL line per pair (the X-card
+  look); nothing else in the body pipeline changed.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1199,6 +1205,26 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 19 (Reddit V3): 'label line + bare URL' link mangle
+  repair** (follow-up to the round-18 live run — post 1whe2tr):
+  * The feed's auto-linker mangled bodies made of "label line + bare URL
+    line" pairs (e.g. `Firefly video` / `https://b23.tv/…` / `Feixiao
+    video` / …): it doubled/tripled the opening `[` of the URL-labelled
+    link, glued `](U](U))` tail fragments on, and duplicated the next
+    label's first word as a dangling `Word](U](U)` line — the card showed
+    nested `[[U](U)…](U](U)…` garbage instead of clickable links.
+  * A new pre-pass in **both** body cleaners (RSS path and proxy path)
+    repairs the family to **one label line + one clickable URL line per
+    pair** — the look of the X cards. Every other line shape is
+    byte-identical to before; the round-15/16 mangle repairs are
+    unchanged.
+  * The round-16 smoke check's expected output was updated to this same
+    label+URL-line format (it is the same mangle family, now rendered in
+    the target layout).
+  * Smoke test: 6 new checks (`tests/test_smoke.py` — 214 total).
+  * Nothing else changed: the round-18 removal filter, cache, proxies,
+    media, FULL MODE, YouTube and crossposts all run exactly as before.
 
 * **2026-09-17 — round 18 (Reddit V3): soft-removed / deleted post filter**
   (follow-up to the round-17 live run):

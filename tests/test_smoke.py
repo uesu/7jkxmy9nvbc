@@ -499,7 +499,8 @@ for module in (v3, proxy):
                   "posting guidelines</a>")
           == "[posting guidelines]"
              "(https://www.reddit.com/r/Genshin_Impact_Leaks/wiki/posting_guidelines/)")
-    check("r16 mangled 3-line link shape repairs to 3 URL-labelled lines",
+    check("r16 mangled link shape -> 3 label lines + 3 clickable URL lines "
+          "(round 19: label and URL on separate lines, 1whe2tr target look)",
           cleaner("Firefly](https://b23.tv/prev0)\n"
                   "Firefly) video [[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
                   "Feixiao](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
@@ -507,9 +508,9 @@ for module in (v3, proxy):
                   "Therta](https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
                   "Therta) video [[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)]"
                   "(https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u))")
-          == "Firefly video [https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
-             "Feixiao video [https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
-             "Therta video [https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
+          == "Firefly video\n[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+             "Feixiao video\n[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+             "Therta video\n[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
 
 check("r15 author underscore", v3._clean_author_name(
     "](https://reddit.com/post)\n*by) Knight_Steve_") == "Knight_Steve_")
@@ -1071,6 +1072,41 @@ check("r18 kept: empty body is NOT removed (link posts)",
       v3.removed_post_reason("Link post", "") is None)
 check("r18 kept: normal body mentioning a pull",
       v3.removed_post_reason("T", "The previous leak was pulled. Here is the new build list...") is None)
+
+# ---- round 19: 'label line + bare URL' mangle repair (post 1whe2tr family)
+_r19_mangled = ("Firefly video [[[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                "Feixiao](https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                "Feixiao) video [[[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                "Therta](https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                "Therta) video [[[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)]"
+                "(https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u))")
+_r19_expected = ("Firefly video\n[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+                 "Feixiao video\n[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)\n\n"
+                 "Therta video\n[https://b23.tv/PNtXo0u](https://b23.tv/PNtXo0u)")
+check("r19 mangle: 1whe2tr family -> label line + clickable URL line (v3)",
+      v3.clean_rss_body(_r19_mangled) == _r19_expected,
+      v3.clean_rss_body(_r19_mangled))
+check("r19 mangle: same result via the proxy cleaner",
+      proxy.clean_proxy_body(_r19_mangled) == _r19_expected,
+      proxy.clean_proxy_body(_r19_mangled))
+_r19_clean = ("Firefly video\nhttps://b23.tv/dkCXgES\n\n"
+              "Feixiao video\nhttps://b23.tv/XojBeMr")
+check("r19 mangle: clean bare-URL body keeps the same look",
+      v3.clean_rss_body(_r19_clean)
+      == "Firefly video\n[https://b23.tv/dkCXgES](https://b23.tv/dkCXgES)\n\n"
+         "Feixiao video\n[https://b23.tv/XojBeMr](https://b23.tv/XojBeMr)",
+      v3.clean_rss_body(_r19_clean))
+check("r19 kept: single-bracket URL-labelled link line untouched",
+      v3.clean_rss_body("Play the demo at [https://b23.tv/x](https://b23.tv/x)")
+      == "Play the demo at [https://b23.tv/x](https://b23.tv/x)",
+      v3.clean_rss_body("Play the demo at [https://b23.tv/x](https://b23.tv/x)"))
+_r19_unpaired = "Firefly video\nFeixiao](https://b23.tv/x](https://b23.tv/x)"
+check("r19 kept: unpaired fragment line dropped, label kept",
+      v3.clean_rss_body(_r19_unpaired) == "Firefly video",
+      v3.clean_rss_body(_r19_unpaired))
+check("r19 kept: mangled body is NOT treated as removed (1whe2tr)",
+      v3.removed_post_reason("4.6 Event Firefly, Feixiao and The Herta gameplay",
+                             _r19_mangled) is None)
 
 asyncio.run(round15_flows())
 asyncio.run(round15_fetch())

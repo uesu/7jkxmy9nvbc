@@ -176,6 +176,87 @@ _BLOCK_BOUNDARY_RE = re.compile(r"(?i)</?(?:p|div|li|tr|table|h[1-6]|blockquote|
 
 
 
+# ---------------------------------------------------------------------------
+# ■ ROUND 19 (2026-09-17): 'LABEL LINE + BARE URL' MANGLE REPAIR
+# The feed's auto-linker can mangle a body made of "label line + bare URL
+# line" pairs (live example: post 1whe2tr — 'Firefly video' /
+# 'https://b23.tv/...' / blank / 'Feixiao video' / ...): it doubles or
+# triples the opening '[' of the URL-labelled link on the label line,
+# glues doubled tail fragments '](U](U))' after the last link, and
+# duplicates the next label's first word as a dangling 'Word](U](U)'
+# line before the 'Word) rest ...' continuation line. This pre-pass
+# (run BEFORE repair_mangled_link_lines) collapses the family back to one
+# label line + one bare URL line per pair; the existing bare-URL rule in
+# _line_stage then makes each URL a clickable line. Lines without the
+# doubled-bracket signature are left byte-identical, so the round 15/16
+# mangle shapes keep their existing repair path.
+# ---------------------------------------------------------------------------
+_R19_TAIL_OK = re.compile(r"(?:\]\(https?://[^\s\[\]]*\)?[\)\]]*)*$")
+_R19_PAIR = re.compile(
+    r"^(?P<label>.+?)[ \t]*(?:\[[ \t]*)+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)(?P<tail>.*)$")
+_R19_WHOLE = re.compile(
+    r"^(?:\[[ \t]*)+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)(?P<tail>.*)$")
+_R19_BFRAG = re.compile(
+    r"^(?P<w>[^\s\[\]]+)\]\(https?://[^\s\[\]]*\]\(https?://[^\s\[\]]*\)?$")
+_R19_WCONT = re.compile(r"^(?P<w>\S+)\)[ \t]+(?P<rest>.*)$")
+_R19_CLEANLINK = re.compile(
+    r"^(?P<label>.+?)[ \t]+\[(?P<u>https?://[^\s\[\]]+)\]\((?P=u)\)$")
+
+
+def _r19_split_label_link(line: str) -> list:
+    """'label [[[U](U) <glue-tail>' -> ['label', 'U']; a whole line of
+    doubled brackets + URL-labelled link (+ glue tail) -> ['U']. A
+    single-bracket '[U](U)' line is clean markdown and never matches
+    (the rule needs two or more '[' runs before the link)."""
+    for mm in (_R19_PAIR.match(line), _R19_WHOLE.match(line)):
+        if mm and _R19_TAIL_OK.match(mm.group("tail") or ""):
+            out = []
+            label = (mm.groupdict().get("label") or "").strip()
+            if label and re.search(r"[^\[\] \t]", label):
+                out.append(label)
+            out.append(mm.group("u"))
+            return out
+    return [line]
+
+
+def _repair_label_url_mangle(lines: list) -> list:
+    """Round 19 pre-pass for repair_mangled_link_lines: the 'label line +
+    bare URL' mangle family (post 1whe2tr). A dangling 'Word](U](U)'
+    fragment line is paired with the 'Word) rest ...' continuation line
+    that follows it (across blank lines) and both collapse to
+    'Word rest' + the URL as its own line; an unpaired fragment line is
+    dropped (its word and URL both appear in the pair)."""
+    out = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i].strip()
+        bm = _R19_BFRAG.fullmatch(line)
+        if bm:
+            w = bm.group("w")
+            j = i + 1
+            while j < n and lines[j].strip() == "":
+                j += 1
+            if j < n:
+                cm = _R19_WCONT.match(lines[j].strip())
+                if cm and cm.group("w").lower() == w.lower():
+                    label_rest = f"{w} {cm.group('rest')}".strip()
+                    cm2 = _R19_CLEANLINK.match(label_rest)
+                    if cm2:
+                        out.extend([cm2.group("label"), cm2.group("u")])
+                    else:
+                        out.extend(_r19_split_label_link(label_rest))
+                    i = j + 1
+                    continue
+            # unpaired fragment line: pure feed garbage (word + url tails,
+            # both duplicated in the pair) — drop it
+            i += 1
+            continue
+        out.extend(_r19_split_label_link(line))
+        i += 1
+    return out
+
+
 def repair_mangled_link_lines(lines: list) -> list:
     """Repair the feed's mangled markdown-link pairs.
 
@@ -292,7 +373,7 @@ def _collapse_blanks(lines: list) -> str:
 def _line_stage(lines: list) -> list:
     """Drop recognizable feed navigation/footer artifacts, not prose."""
     kept = []
-    for line in repair_mangled_link_lines(lines):
+    for line in repair_mangled_link_lines(_repair_label_url_mangle(lines)):
         if line.lower() in ("link", "comments", "[link]", "[comments]", "permalink"):
             continue
         if re.match(r"^submitted\)?\s+by\s+\[?\s*/?u/", line, re.I):
