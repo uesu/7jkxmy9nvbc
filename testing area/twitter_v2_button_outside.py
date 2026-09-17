@@ -135,7 +135,10 @@ RSS_INSTANCES = [
 # arrives, set it as the repo VARIABLE NITTER_RSS_TOKEN (Settings -> Secrets
 # and variables -> Actions -> Variables) — the next run picks it up (read at
 # call time, no code change). The token is sent BOTH ways: Authorization:
-# Bearer header and ?token= query param, so either convention works.
+# Bearer header and ?token= query param, so either convention works. Round
+# 14 (2026-09-18): the operator (ted@miningtcup.me) confirmed the token is
+# accepted anywhere in the User-Agent too, so it now goes out in all three
+# places at once.
 RSS_TOKEN_ENV = {
     "https://nitter.miningtcup.me": "NITTER_RSS_TOKEN",
 }
@@ -757,11 +760,15 @@ async def fetch_working_feed(session: aiohttp.ClientSession, account: str):
         token_env = RSS_TOKEN_ENV.get(instance)
         token = os.getenv(token_env, "").strip() if token_env else ""
         if token:
-            # Token-gated instance (bot check): send the RSS token both as a
-            # Bearer header and a ?token= query param — a wrong/missing
-            # token just gets a challenge/403 answer, which is logged below
-            # and the chain moves on.
-            req_headers = {**headers, "Authorization": f"Bearer {token}"}
+            # Token-gated instance (bot check): send the RSS token as a
+            # Bearer header, inside the User-Agent (round 14, 2026-09-18 —
+            # the operator confirmed the token is accepted anywhere in the
+            # UA) and as a ?token= query param. A wrong/missing token just
+            # gets a challenge/403 answer, which is logged below and the
+            # chain moves on.
+            req_headers = {**headers,
+                           "Authorization": f"Bearer {token}",
+                           "User-Agent": f"Mozilla/5.0 {token}"}
             feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
         try:
             async with session.get(feed_url, headers=req_headers,

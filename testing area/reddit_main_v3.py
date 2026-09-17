@@ -586,6 +586,9 @@ class _ArcticEntry:
         self.link = f"https://www.reddit.com/r/{sub}/comments/{pid}/"
         self.title = post.get("title") or ""
         self.author = post.get("author") or ""
+        # round 23 (2026-09-18): keep the raw post for _arctic_media_hint
+        # (the media-wait gate in main). No other behavior changes.
+        self._arctic_post = post
         created = post.get("created_utc")
         updated = post.get("updated_utc") or created
         self.published_parsed = (time.localtime(created)
@@ -629,14 +632,20 @@ def _clean_post_title(value) -> str:
 # posts are skipped (not posted) and NOT cached, so a post that gets
 # approved later is caught and posted normally.
 # ---------------------------------------------------------------------------
-_REMOVED_TITLE_RE = re.compile(r"^\s*\*{0,2}\[ ?(?:removed|deleted) ?\]\*{0,2}\s*$", re.I)
+# round 23 (2026-09-18): a whole title of "[ Removed by moderator ]" is a
+# removal marker too (reddit.com renders it as the post title); the
+# longer alternative comes FIRST so it is tried before the bare "removed".
+_REMOVED_TITLE_RE = re.compile(
+    r"^\s*\*{0,2}\[ ?(?:removed ?by ?(?:the )?moderators?|removed|deleted) ?\]\*{0,2}\s*$",
+    re.I)
 _REMOVED_WHOLE_BODY_RE = re.compile(
     r"^\*{0,2}\[ ?(?:deleted|removed) ?\]\*{0,2}$"
     r"|^\*{0,2}\[ ?removed ?by ?moderator ?\]\*{0,2}$", re.I)
 _REMOVED_NOTICE_RES = (
     (re.compile(r"sorry,? (?:this|the) post (?:has been|was) (?:removed|deleted)", re.I), "removal notice"),
     (re.compile(r"\[ ?removed ?by ?moderator ?\]", re.I), "removed by moderator"),
-    (re.compile(r"removed by (?:the )?moderators?", re.I), "removed by moderators"),
+    (re.compile(r"removed by (?:the )?(?:moderators?|reddit)", re.I),
+     "removed by moderators/filters"),
     (re.compile(r"(?:was|has been) deleted by the person who originally posted it", re.I), "deleted by author"),
 )
 
@@ -664,6 +673,35 @@ def removed_post_reason(title: str | None, body: str | None) -> str | None:
         if rx.search(head):
             return reason
     return None
+
+
+def _arctic_media_hint(post) -> bool:
+    """Round 23 (2026-09-18): does the Arctic record POSITIVELY say this
+    post has media (a gallery, a rich link, or a redd.it media URL)?
+
+    Only a positive hint triggers the media-wait gate in main(): text
+    and link posts (no gallery flags, no redd.it media URL) have no
+    hint and post exactly as before. Arctic fills gallery_data /
+    media_metadata asynchronously after capture, so a fresh gallery
+    post can carry its text here without its media — the hint is
+    what makes that detectable (1wj38fc posted media-less because
+    none of that was visible at the time).
+    """
+    if not isinstance(post, dict):
+        return False
+    if post.get("is_gallery") or post.get("gallery_data") or post.get("media_metadata"):
+        return True
+    if post.get("post_hint") in ("image", "rich_link"):
+        return True
+    if post.get("secure_media_domain") in (
+            "i.redd.it", "preview.redd.it", "external-preview.redd.it", "v.redd.it"):
+        return True
+    for key in ("url", "url_overridden_by_dest"):
+        u = post.get(key) or ""
+        if re.match(r"https?://(?:i|preview|external-preview)\.redd\.it/", u) \
+                or "v.redd.it/" in u:
+            return True
+    return False
 
 
 def _clean_plain_body(text) -> str:
@@ -2547,6 +2585,27 @@ async def main():
             try:
                 data = await resolve_post_media(session, base, post_json,
                                                 path=path, label=unique_key)
+                # ---- round 23 (2026-09-18): Arctic media-hint gate ------
+                # Arctic fills gallery_data / media_metadata ASYNCHRONOUSLY
+                # after capture, so a brand-new media post can be archived
+                # with its text but not its media for a while. If the record
+                # positively says the post has media (see _arctic_media_hint)
+                # but no source served any this run, never post a media-less
+                # card (1wj38fc: posted once without images, then cached
+                # forever). Skip + don't cache: the next run retries, and
+                # once the media is available (Arctic fields filled, or a
+                # proxy renders the og: tags) the full gallery posts. The
+                # 48h freshness window bounds the retries.
+                if (not TEST_POST_ID and not DRY_RUN and post_json is None
+                        and isinstance(entry, _ArcticEntry)
+                        and not data["media"]
+                        and _arctic_media_hint(getattr(entry, "_arctic_post", None))):
+                    logging.info(f"[{unique_key}] archive record says this post "
+                                 f"has media (gallery/media_metadata) but no "
+                                 f"source served any yet (Arctic fills those "
+                                 f"asynchronously) — skipping, not cached "
+                                 f"(retries next run).")
+                    continue
                 posted_ts = int(max(published_ts, activity_ts))
                 payload = build_v3_payload(subreddit, data, reddit_url, posted_ts)
 

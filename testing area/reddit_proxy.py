@@ -788,10 +788,17 @@ async def fetch_proxy_post(session, path: str, label: str = "",
                            health: dict | None = None,
                            need_video: bool = False) -> dict | None:
     """Try the proxy services in priority order and return the normalized
-    result of the first one that produced usable data (media, stats, or
-    body). Services the warm-up proved dead this run are skipped — unless
-    ALL of them are dead, in which case every service gets a fresh try.
-    Returns None when nothing works (the caller uses the native path).
+    result of the first one that produced MEDIA (photos / GIFs / video).
+    A text/stats-only result never stops the chain (round 23, 2026-09-18):
+    a service can have the post's text but not (yet) its images — e.g. a
+    gallery post minutes after posting, when the og:image tags have not
+    been rendered yet (1wj38fc: vxreddit served the title + stats while
+    embeddit — never tried under the old rule — DID have both photos).
+    The first text-only result is kept as the body/stats fallback; if no
+    service produces media, that fallback is returned instead. Services
+    the warm-up proved dead this run are skipped — unless ALL of them
+    are dead, in which case every service gets a fresh try. Returns None
+    when nothing works (the caller uses the native path).
     need_video (video posts): a result WITHOUT video media (thumbnails /
     text only) cannot win — the first such result is kept as a body/stats
     fallback while the chain keeps looking for the service that serves
@@ -819,9 +826,23 @@ async def fetch_proxy_post(session, path: str, label: str = "",
                 logging.info(f"[{label}] {service} result has no video — "
                              f"trying the next proxy.")
                 continue
-            logging.info(f"[{label}] proxy media via {service} — "
-                         f"{len(result['media'])} item(s).")
-            return result
+            if result["media"]:
+                # a media-producing result is the winner (photos/GIF/video)
+                logging.info(f"[{label}] proxy media via {service} — "
+                             f"{len(result['media'])} item(s).")
+                return result
+            # round 23 (2026-09-18): text/stats-only — NOT a winner. A
+            # service can have the post's text but not (yet) its images
+            # (too-new gallery posts — 1wj38fc: vxreddit served title +
+            # stats minutes after posting while the og:image tags were
+            # still missing, and the old rule stopped the chain here,
+            # hiding embeddit, which DID have the photos). Keep the first
+            # such result as the body/stats fallback and let the remaining
+            # services have their shot at the media.
+            if fallback_result is None:
+                fallback_result = result
+            logging.info(f"[{label}] {service} returned text only (no media) — "
+                         f"continuing the chain for the media.")
         logging.info(f"[{label}] {service} had no usable data — trying the next proxy.")
     return fallback_result
 
