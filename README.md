@@ -675,6 +675,12 @@ credits, no API key):
   embeddit → redlib) before posting: a post that is removed, deleted or
   still pending approval is invisible to them, so it is skipped and NOT
   cached — and posts normally once approved/restored.
+* **Round 21 follow-up (same day):** the card body now matches the
+  original post as RAW text: the mangle fix outputs `label + bare URL`
+  (no markdown), clean "label / URL" pairs collapse to ONE raw line, and
+  standalone URL lines stay raw — Discord auto-links every bare URL in
+  the component v2 container. Clean links, prose and all round 15/16
+  shapes untouched.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1214,6 +1220,27 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 21 (Reddit V3): raw plain links** (follow-up to
+  the round-20 live run — the card body should match the ORIGINAL post
+  as raw text):
+  * **Mangle output is now raw:** the round-20 fix outputs
+    `Firefly video https://b23.tv/…` — label + the bare URL exactly
+    once, no markdown wrapping (renders identically: Discord auto-links
+    the bare URL in the component v2 container).
+  * **Clean "label / URL" pairs collapse to one raw line:** a bare URL
+    line under a plain label line (the original post's shape, with or
+    without a blank line between) becomes `label https://…` — the same
+    look mangled posts get, so all label+URL posts render identically.
+  * **Standalone URL lines stay raw:** no longer wrapped in markdown —
+    Discord auto-links them (YouTube-line removal, redd.it media URL
+    removal and every other body rule are unaffected).
+  * Smoke test: the round-20 link checks now pin the raw output, plus
+    5 new label/URL-pair + standalone-URL checks (`tests/test_smoke.py`
+    — 222 total).
+  * Nothing else changed: RSS, proxies, FULL MODE, YouTube, crossposts,
+    the liveness gate and the round-18 removal filter all run exactly
+    as before.
 
 * **2026-09-17 — round 20 (Reddit V3): archive liveness gate + the simple
   plain-link fix** (follow-up to the round-19 live run):
