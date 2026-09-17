@@ -454,6 +454,31 @@ entry is a repost by the feed account. (FxEmbed's payload does include a
 queried; nitter RSS links point at the original author's status, so the feed
 itself is the signal.)
 
+## 🆕 X V2/V3 — round 14 (2026-09-18): miningtcup RSS token live (sent two ways)
+
+The emailed RSS token for the token-gated `nitter.miningtcup.me` instance
+is now sent in **BOTH** places its operator (`nitter-rss@miningtcup.me`)
+confirmed it is accepted — the `Authorization: Bearer` header **and**
+inside the `User-Agent` (the round-12 `?token=` query param is kept, so
+all three conventions are covered at once):
+
+```python
+req_headers = {**headers,
+               "Authorization": f"Bearer {token}",
+               "User-Agent": f"Mozilla/5.0 {token}"}
+feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
+```
+
+* **One-time setup:** put the token in the existing repo variable
+  `NITTER_RSS_TOKEN` (Settings → Secrets and variables → Actions →
+  Variables). Nothing else to do — the next cron-job.org run picks it up.
+* **Effect:** `miningtcup.me` (the one token-gated instance of the
+  11-instance fleet) joins the chain as a normal instance instead of
+  logging a bot-check miss. If it ever answers with 0 entries, it is
+  logged and the chain moves on, exactly as in round 12.
+* **Credits:** token-gated RSS instance + token provided by
+  **miningtcup** (`nitter.miningtcup.me`) — thank you!
+
 ## 🌐 How translation works (all versions)
 
 1. The script fetches the tweet from the FxTwitter API and reads its `lang` field.
@@ -788,6 +813,62 @@ credits, no API key):
   URL — the original line — and the repaired mangle family outputs the
   bare URL too. Descriptive links (`[text](URL)`, text ≠ URL) and prose
   stay byte-identical.
+
+### 🆕 Reddit V3 — round 23 (2026-09-18): media must win the proxy chain (the 1wj38fc gallery) + removal-notice variants
+
+**What broke (1wj38fc):** `AnantaLeaks/1wj38fc` (posted 19:10Z, a
+2-photo gallery, spoilered) was posted at 19:16Z **without any images**
+and cached that way. Timeline: at +6 min vxreddit served the title +
+stats + body, but its og:image tags had not been rendered yet;
+`fetch_proxy_post` accepted that text-only result as "usable" and
+**stopped the chain**, so embeddit — which already had both photos — was
+never tried; Arctic's media fields were still empty too (it fills
+`gallery_data`/`media_metadata` asynchronously after capture); every
+other source came up empty; the media-less card was posted and cached,
+so no later run ever fixed it.
+
+**The fix (two gates, both in `testing area/`):**
+
+* **Proxy-chain gate (round 23 rule):** `fetch_proxy_post` now returns
+  the first service that produces **MEDIA** (photos / GIFs / video). A
+  text/stats-only result never stops the chain — it is kept as the
+  body/stats fallback and the remaining services still get their shot
+  at the media. If no service produces media, the first text-only result
+  is returned (text posts post exactly as before). The `need_video`
+  video rule is unchanged. Log line:
+  `[<key>] <service> returned text only (no media) — continuing the chain for the media.`
+* **Arctic media-hint gate (main loop):** if the Arctic record
+  positively says the post has media (gallery flags, `post_hint` =
+  image/rich_link, `secure_media_domain` on a redd.it media domain, or a
+  redd.it media URL) but **no source served any media this run**, the
+  post is skipped and **NOT cached** — the next run retries, and once
+  the media is available (Arctic's fields filled, or a proxy renders
+  the og: tags) the full gallery posts. Bounded by the 48h freshness
+  window. Text/link posts have no positive hint and post normally. Log
+  line: `archive record says this post has media ... skipping, not cached (retries next run).`
+
+**Acceptance:** images AND content media — still images, GIFs, and
+videos — now reach the card for future posts, including spoilered posts
+(spoiler images live in the same media fields — `media_metadata` /
+gallery data — and in every proxy's media list; verified on 1wj38fc
+itself, where embeddit served both of its photos), and the 1wj38fc
+failure mode ("posted media-less, cached forever") is closed by the two
+gates above.
+
+**22(b) removal-notice variants:**
+
+* A whole title of `[ Removed by moderator ]` (any bold / inner spacing)
+  is now a removal marker — before, only whole titles of `[removed]` /
+  `[deleted]` were caught (the "removed by moderator" wording only
+  matched in the body).
+* The "removed by moderators" notice regex now also catches "removed by
+  **Reddit**'s filters" / "…Reddit's automated system" (Reddit renders
+  filter removals with its own wording).
+
+Both remain deliberately narrow: the title marker must be the *entire*
+title, the body notices are only checked in the first 400 characters,
+and every skip is *not cached* — so a false positive retries and posts
+on a later run instead of being lost.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1344,6 +1425,27 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 
 ## 🗒 Changelog
 
+* **2026-09-18 — Reddit V3 round 23: media must win the proxy chain (the
+  1wj38fc gallery) + removal-notice variants.** `AnantaLeaks/1wj38fc`
+  (2-photo spoilered gallery) posted media-less and was cached that way:
+  at +6 min vxreddit served title/stats/body but no og:image yet, and the
+  old chain rule accepted that text-only result as "usable" and stopped
+  the chain before embeddit (which DID have the photos) was tried. Now:
+  (1) `fetch_proxy_post` returns the first service with media — a
+  text/stats-only result is kept as fallback and the chain continues;
+  (2) an Arctic record that positively says a post has media (gallery
+  flags / `post_hint` / redd.it media URL) but had none served this run
+  is skipped and NOT cached — the next run retries (48h window bound),
+  so the full gallery posts once the media is available. 22(b): a whole
+  title of `[ Removed by moderator ]` is now a removal marker, and the
+  moderators notice also catches "removed by Reddit's filters."
+* **2026-09-18 — X V2/V3 round 14: miningtcup RSS token live (sent two
+  ways).** The emailed token for the token-gated `nitter.miningtcup.me`
+  instance is now sent as the `Authorization: Bearer` header **and**
+  inside the `User-Agent` (the operator confirmed the token is accepted
+  anywhere in the UA; the round-12 `?token=` query param is kept) — both
+  V3 and V2. Put it in the existing repo variable `NITTER_RSS_TOKEN`;
+  the next run picks it up. Credits: miningtcup.
 * **2026-09-17 — X V2 catch-up: rounds 11 + 12 backported from V3** (V2 is
   the standby engine — `twitter_monitor.yml` still runs V3, so live output
   is unchanged):
