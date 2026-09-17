@@ -681,6 +681,14 @@ credits, no API key):
   standalone URL lines stay raw — Discord auto-links every bare URL in
   the component v2 container. Clean links, prose and all round 15/16
   shapes untouched.
+* **Round 22 follow-up (same day, from the 1whe2tr re-test on the new
+  code):** the post's bare URLs can also arrive from a source that
+  auto-links them as a clean `label [U](U)` markdown link — the card
+  body renders as plain text, so such a link showed its literal
+  brackets. URL-labelled links (text == URL) now collapse to the bare
+  URL — the original line — and the repaired mangle family outputs the
+  bare URL too. Descriptive links (`[text](URL)`, text ≠ URL) and prose
+  stay byte-identical.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
@@ -1220,6 +1228,27 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-17 — round 22 (Reddit V3): clean auto-linked links stay raw**
+  (same-day follow-up — the 1whe2tr re-test ON THE NEW CODE still showed
+  `Firefly video [https://b23.tv/…](https://b23.tv/…)`): the post's bare
+  URLs can also arrive from a source that AUTO-LINKS them, as a CLEAN
+  markdown link (`label [U](U)`). Round 21 intentionally left clean
+  links untouched — but the components-v2 card renders the body as
+  PLAIN TEXT, so a link whose text is its own URL showed its literal
+  brackets. Round 22 collapses URL-labelled links (text == URL) to the
+  bare URL:
+  * `Firefly video [https://b23.tv/…](https://b23.tv/…)` →
+    `Firefly video https://b23.tv/…` (the original line; mangle faces,
+    raw pairs and standalone URL lines behave exactly as round 20/21).
+  * The repaired mangle family (round-15 cascade) now outputs the bare
+    URL too, so every label+URL face renders identically.
+  * Descriptive links (`[text](URL)` with text ≠ URL) and prose stay
+    byte-identical; lines with mangle residue are untouched by the new
+    step.
+  * Smoke test: the round-15 URL-labelled/cascade checks now pin the
+    raw output + 4 new round-22 checks (`tests/test_smoke.py` — 226
+    total).
 
 * **2026-09-17 — round 21 (Reddit V3): raw plain links** (follow-up to
   the round-20 live run — the card body should match the ORIGINAL post
