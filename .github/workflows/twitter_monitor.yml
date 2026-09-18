@@ -60,17 +60,16 @@ jobs:
         # ───────────────────────────────────────────────────────────────────
         # TESTING AREA (how updates ship):
         # • A new/changed script lives in "testing area/" FIRST (e.g.
-        #   main_v3test.py). Point this line at the test copy — THE QUOTES
+        #   twitter_v3.py). Point this line at the test copy — THE QUOTES
         #   ARE REQUIRED (the folder name contains a space):
-        #       run: python "testing area/main_v3test.py"
+        #       run: python "testing area/twitter_v3.py"
         # • Check BOTH the Discord post(s) AND this workflow's log.
-        # • Once the test copy passes, copy it over the production file and
-        #   point this line back:
-        #       run: python main.py       <- V1 (plain, no API key)
-        #       run: python main_v2.py    <- V2 (card, buttons outside)
-        #       run: python main_v3.py    <- V3 (card, buttons nested)
+        # • Switch between engines by pointing the run line to:
+        #       run: python twitter_v1.py                              <- V1 (plain, no API key)
+        #       run: python "testing area/twitter_v2_button_outside.py" <- V2 (card, buttons outside)
+        #       run: python "testing area/twitter_v3.py"                <- V3 (card, buttons nested)
         # ───────────────────────────────────────────────────────────────────
-        run: python "testing area/twitter_v3.py"   # ← switch to twitter_v1.py / twitter_v2.py here
+        run: python "testing area/twitter_v3.py"   # ← switch to twitter_v1.py / twitter_v2_button_outside.py here
 
       - name: Commit and push updated posted_tweets.json cache
         run: |

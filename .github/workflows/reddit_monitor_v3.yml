@@ -95,15 +95,14 @@ jobs:
         # ───────────────────────────────────────────────────────────────────
         # TESTING AREA (how updates ship):
         # • A new/changed script lives in "testing area/" FIRST (e.g.
-        #   reddit_main_v3test.py). Point this line at the test copy — THE
+        #   reddit_main_v3.py). Point this line at the test copy — THE
         #   QUOTES ARE REQUIRED (the folder name contains a space):
-        #       run: python "testing area/reddit_main_v3test.py"
+        #       run: python "testing area/reddit_main_v3.py"
         # • Check BOTH the Discord post(s) AND this workflow's log.
-        # • Once the test copy passes, copy it over the production file and
-        #   point this line back:
-        #       run: python reddit_main.py      <- plain V1 (free, mirror link)
-        #       run: python reddit_main_v2.py   <- rich card (EmbedEZ key)
-        #       run: python reddit_main_v3.py   <- rich card (native media, no key)
+        # • Switch between engines by pointing the run line to:
+        #       run: python "testing area/reddit_main.py"            <- plain V1 (free, mirror link)
+        #       run: python "testing area/reddit_main_v2_embedez.py"  <- rich card (EmbedEZ key)
+        #       run: python "testing area/reddit_main_v3.py"          <- rich card (native media, no key)
         # ───────────────────────────────────────────────────────────────────
         run: python "testing area/reddit_main_v3.py"   # ← V3 (proxy media + native fallback)
 
