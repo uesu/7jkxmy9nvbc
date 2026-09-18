@@ -50,11 +50,13 @@ jobs:
           # one specific tweet via the direct FxTwitter path (nitter-free).
           TEST_TWEET_ID: ${{ github.event.inputs.test_tweet }}
           # Nitter RSS token (2026-09-17): nitter.miningtcup.me is behind a
-          # bot check. When the emailed RSS token arrives, set it as a repo
-          # VARIABLE (Settings -> Secrets and variables -> Actions ->
-          # Variables -> NITTER_RSS_TOKEN) — the next run picks it up, no
-          # code change. Empty = the chain just skips that instance.
-          NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}
+          # bot check. The emailed RSS token lives in the NITTER_RSS_TOKEN
+          # repo SECRET (Settings -> Secrets and variables -> Actions ->
+          # Secrets -> NITTER_RSS_TOKEN) — GitHub masks secret values in
+          # every log line, so it can never print in the Actions log.
+          # The next run picks it up, no code change.
+          # Empty = the chain just skips that instance.
+          NITTER_RSS_TOKEN: ${{ secrets.NITTER_RSS_TOKEN }}
         # ───────────────────────────────────────────────────────────────────
         # TESTING AREA (how updates ship):
         # • A new/changed script lives in "testing area/" FIRST (e.g.

@@ -53,11 +53,12 @@ jobs:
           #   can be deleted from the repo (only the old V2 needs it)
           REDDIT_FEED_TOKEN: ${{ secrets.REDDIT_FEED_TOKEN }}   # your Reddit feed token (recommended — old.reddit.com -> Preferences -> Feeds; V3 also tries it on .json for full mode)
           # round 24 (2026-09-18): miningtcup's DogWAF token — the SAME
-          # repo variable the Twitter monitor uses (NITTER_RSS_TOKEN).
+          # value the Twitter monitor uses (NITTER_RSS_TOKEN), stored as a
+          # repo SECRET in both repos (GitHub masks secrets in all logs);
           # V3 appends it as ?token= on redlib.miningtcup.me requests;
           # if the operator scoped the token to nitter only, that
           # instance just logs a bot-check miss and the chain moves on.
-          NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}
+          NITTER_RSS_TOKEN: ${{ secrets.NITTER_RSS_TOKEN }}
           # Test tools (round 12): manual runs only. TEST_POST_ID rebuilds one
           # specific post; DRY_RUN logs payloads without touching Discord.
           TEST_POST_ID: ${{ github.event.inputs.test_post }}
