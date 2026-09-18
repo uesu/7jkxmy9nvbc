@@ -403,12 +403,14 @@ log lines to explain why.
 3. **RSS token support for `nitter.miningtcup.me`** (bot check). A token
    request was emailed to `nitter-rss@miningtcup.me`. **When the token
    arrives:**
-   * **Repo → Settings → Secrets and variables → Actions → Variables →
-     New repository variable** → name **`NITTER_RSS_TOKEN`**, value = the
-     token from the email.
+   * **Repo → Settings → Secrets and variables → Actions → Secrets →
+     New repository secret** → name **`NITTER_RSS_TOKEN`**, value = the
+     token from the email. (A repo *secret*, not a *variable* — GitHub
+     masks secrets in every log line; variables print in plain text,
+     which is how the token ended up visible in the run logs.)
    * That's it. The workflow already wires
-     `NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}` and the script reads
-     it at call time — the **next cron-job.org run** picks it up
+     `NITTER_RSS_TOKEN: ${{ secrets.NITTER_RSS_TOKEN }}` and the script
+     reads it at call time — the **next cron-job.org run** picks it up
      automatically (no code change, no re-deploy). The token is sent BOTH as
      an `Authorization: Bearer` header and a `?token=` query param, so
      either token convention the instance uses works. Until then the chain
@@ -469,9 +471,9 @@ req_headers = {**headers,
 feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
 ```
 
-* **One-time setup:** put the token in the existing repo variable
+* **One-time setup:** put the token in the existing repo secret
   `NITTER_RSS_TOKEN` (Settings → Secrets and variables → Actions →
-  Variables). Nothing else to do — the next cron-job.org run picks it up.
+  Secrets). Nothing else to do — the next cron-job.org run picks it up.
 * **Effect:** `miningtcup.me` (the one token-gated instance of the
   11-instance fleet) joins the chain as a normal instance instead of
   logging a bot-check miss. If it ever answers with 0 entries, it is
@@ -559,10 +561,10 @@ jobs:
           WEBHOOK_ANANTA_EN: ${{ secrets.WEBHOOK_ANANTA_EN }}
           # Test tools (round 12): TEST_TWEET_ID rebuilds one tweet nitter-free
           # (manual runs only); NITTER_RSS_TOKEN feeds the token-gated
-          # nitter.miningtcup.me instance (repo variable — set when the
-          # emailed token arrives).
+          # nitter.miningtcup.me instance (repo SECRET — GitHub masks
+          # secret values in all logs automatically).
           TEST_TWEET_ID: ${{ github.event.inputs.test_tweet }}
-          NITTER_RSS_TOKEN: ${{ vars.NITTER_RSS_TOKEN }}
+          NITTER_RSS_TOKEN: ${{ secrets.NITTER_RSS_TOKEN }}
         # While testing a new version, point this line at the test copy instead
         # (QUOTES REQUIRED — the folder name has a space):
         #   run: python "testing area/main_v3test.py"
@@ -886,8 +888,9 @@ their home-made JavaScript-free WAF that auto-passes current browsers
 and challenges scripts. The operator states that DogWAF access tokens
 ("passes") given out by one instance are valid on their other
 instances — and the nitter RSS token comes from that same
-infrastructure, so it is very likely such a pass (unverified on redlib;
-the first runs after merge confirm it). The same repo variable
+infrastructure, so it is very likely such a pass (unverified on redlib —
+runs so far show the WAF still rejecting it from GitHub Actions; the
+operator has been emailed). The same repo secret
 **`NITTER_RSS_TOKEN`** (already set for the Twitter monitor) is now
 wired into `reddit_monitor_v3.yml` too, and V3 appends it as `?token=`
 to every `redlib.miningtcup.me` request — feeds and post pages alike
@@ -1033,6 +1036,7 @@ channel check:
 | `EMBEDEZ_API_KEY` | **V2 only** — from your embedez.com dashboard |
 | `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` *(optional — V3)* | Reddit **script app** (reddit.com/prefs/apps → type "script" → redirect `http://localhost`). Enables V3 **FULL MODE** reliably (all photos, stats, OP comment, true crosspost embeds) via OAuth. 2026 note: new API access may require Reddit's approval form — V3 works without it (feed-token `.json` attempt, then native mode). |
 | `DISCORD_WEBHOOK_URL` *(optional)* | Catch-all fallback |
+| `NITTER_RSS_TOKEN` *(optional — repo **Secret**, not a Variable)* | miningtcup's DogWAF token — unlocks the token-gated `nitter.miningtcup.me` RSS instance (X monitor) and `redlib.miningtcup.me` (Reddit V3, appended as `?token=`). Stored as a secret because GitHub masks secrets in every log line but prints variables in plain text. Empty = those instances just log a bot-check miss and the chain moves on (round-12 / round-24 sections). |
 
 **Optional V3 switches** (repo **Variables**, not Secrets — behavior is fine
 with none of them set):
@@ -1438,7 +1442,7 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
   with zero log lines until round 12 made the path visible). Check
   [status.d420.de](https://status.d420.de/) and refresh `RSS_INSTANCES` in
   `testing area/twitter_v3.py` (verified-fresh first); for a token-gated
-  instance set the `NITTER_RSS_TOKEN` variable (round-12 section above). To
+  instance set the `NITTER_RSS_TOKEN` secret (round-12 section above). To
   rebuild one specific missed tweet meanwhile: *Run workflow* →
   `test_tweet` = `screen_name/tweet_id`.
 * **`Could not fetch valid RSS feed for @…` / `r/…`** — public mirrors rotate/die. For Reddit, see
