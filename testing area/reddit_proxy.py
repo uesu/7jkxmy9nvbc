@@ -51,6 +51,9 @@ PROXY_BOT_UA = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com
 # the most uptime-reliable and are the fallbacks.
 PROXY_SERVICES = ("redditez", "vxreddit", "embeddit")
 
+# Round 25: two gallery containers x ten items; nothing more fits a card.
+MEDIA_CAP_ITEMS = 20
+
 # --- redditez / EmbedEZ (keyless public API) --------------------------------
 REDDITEZ_SEARCH_ENDPOINT = "https://embedez.com/api/v1/providers/search"
 REDDITEZ_EMBED_PAGE = "https://embedez.com/embed/{key}"
@@ -788,7 +791,9 @@ async def fetch_proxy_post(session, path: str, label: str = "",
                            health: dict | None = None,
                            need_video: bool = False) -> dict | None:
     """Try the proxy services in priority order and return the normalized
-    result of the first one that produced MEDIA (photos / GIFs / video).
+    result with the MOST media (photos / GIFs / video). Round 25:
+    partial results no longer stop the chain; ties keep service priority.
+    The winning media list is copied and capped at MEDIA_CAP_ITEMS.
     A text/stats-only result never stops the chain (round 23, 2026-09-18):
     a service can have the post's text but not (yet) its images — e.g. a
     gallery post minutes after posting, when the og:image tags have not
@@ -810,6 +815,7 @@ async def fetch_proxy_post(session, path: str, label: str = "",
     if len(marked_down) < len(order):
         order = [s for s in order if s not in marked_down]
     fallback_result = None
+    best_media_result = None
     for service in order:
         if service == "redditez":
             result = await _fetch_redditez(session, path, label)
@@ -827,10 +833,29 @@ async def fetch_proxy_post(session, path: str, label: str = "",
                              f"trying the next proxy.")
                 continue
             if result["media"]:
-                # a media-producing result is the winner (photos/GIF/video)
-                logging.info(f"[{label}] proxy media via {service} — "
-                             f"{len(result['media'])} item(s).")
-                return result
+                # Round 25: keep looking for a more complete gallery (1wj0p83).
+                # Equal counts preserve the higher-priority service and its order.
+                if (best_media_result is None
+                        or len(result["media"]) > len(best_media_result["media"])):
+                    if best_media_result is not None:
+                        logging.info(f"[{label}] {service} has "
+                                     f"{len(result['media'])} media item(s) vs "
+                                     f"{len(best_media_result['media'])} — "
+                                     f"replacing the winner.")
+                    best_media_result = result
+                    logging.info(f"[{label}] proxy media via {service} — "
+                                 f"{len(result['media'])} item(s) (best so far).")
+                    if len(best_media_result["media"]) >= MEDIA_CAP_ITEMS:
+                        logging.info(f"[{label}] media card capacity reached — "
+                                     f"chain complete.")
+                        break
+                else:
+                    logging.info(f"[{label}] {service} media "
+                                 f"({len(result['media'])} item(s)) not more "
+                                 f"complete than the best so far "
+                                 f"({len(best_media_result['media'])}) — keeping "
+                                 f"the earlier service.")
+                continue
             # round 23 (2026-09-18): text/stats-only — NOT a winner. A
             # service can have the post's text but not (yet) its images
             # (too-new gallery posts — 1wj38fc: vxreddit served title +
@@ -844,6 +869,13 @@ async def fetch_proxy_post(session, path: str, label: str = "",
             logging.info(f"[{label}] {service} returned text only (no media) — "
                          f"continuing the chain for the media.")
         logging.info(f"[{label}] {service} had no usable data — trying the next proxy.")
+    if best_media_result is not None:
+        # Cap a copy: never mutate the service's original result/list.
+        best_media_result = dict(best_media_result)
+        best_media_result["media"] = best_media_result["media"][:MEDIA_CAP_ITEMS]
+        logging.info(f"[{label}] proxy media winner — "
+                     f"{len(best_media_result['media'])} item(s).")
+        return best_media_result
     return fallback_result
 
 

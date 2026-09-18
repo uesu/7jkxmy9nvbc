@@ -190,6 +190,14 @@
 #       .me (Invidious) was checked the same day: up (v2026.09.13) but
 #       video fetch broken (Invidious error page on /watch) — NOT
 #       wired in; revisit once playback is fixed.
+#   21. (round 25, 2026-09-18) MOST-COMPLETE-MEDIA-WINS (1wj0p83):
+#       proxy chain keeps the largest media list, ties keep priority,
+#       and the returned list is capped at 20 (card capacity). The chain
+#       stops early at capacity. Archive posts with a known
+#       larger gallery count skip without caching and retry within the
+#       48h window. Unknown counts and video cards are exempt.
+#       This reduces partial galleries; it cannot prove completeness
+#       when every source is partial and the archive count is unknown.
 #
 # ■ WORKFLOW: identical to V1/V2. Test-area first:
 #   run: python "testing area/reddit_main_v3.py"
@@ -728,6 +736,15 @@ def _arctic_media_hint(post) -> bool:
                 or "v.redd.it/" in u:
             return True
     return False
+
+
+def _arctic_media_count(post) -> int:
+    """Round 25: count valid, filled gallery entries; unknown/non-gallery is 0.
+
+    Reuse the ordered Arctic extractor so invalid/deleted entries do not
+    delay a post forever. Only a positive count can gate partial media.
+    """
+    return len(arctic_gallery_items(post))
 
 
 def _clean_plain_body(text) -> str:
@@ -2644,6 +2661,19 @@ async def main():
                                  f"asynchronously) — skipping, not cached "
                                  f"(retries next run).")
                     continue
+                # Round 25: known partial archive galleries wait without caching.
+                # Unknown counts cannot gate; video cards intentionally use one tile.
+                if (not TEST_POST_ID and not DRY_RUN and post_json is None
+                        and isinstance(entry, _ArcticEntry)
+                        and data["media"]
+                        and not any(m["kind"] == "video" for m in data["media"])):
+                    _arctic_n = _arctic_media_count(getattr(entry, "_arctic_post", None))
+                    if _arctic_n > len(data["media"]):
+                        logging.info(f"[{unique_key}] archive record lists "
+                                     f"{_arctic_n} gallery items but the sources "
+                                     f"served only {len(data['media'])} this run — "
+                                     f"skipping, not cached (retries next run).")
+                        continue
                 posted_ts = int(max(published_ts, activity_ts))
                 payload = build_v3_payload(subreddit, data, reddit_url, posted_ts)
 
