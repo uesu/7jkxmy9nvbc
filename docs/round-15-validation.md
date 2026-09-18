@@ -40,7 +40,7 @@ archive source; the existing authenticated FULL MODE media path is unchanged.
 Run without secrets or network requests:
 
 ```sh
-python -m compileall -q main.py "testing area" tests
+python -m compileall -q twitter_v1.py "testing area" tests
 python tests/test_smoke.py
 git diff --check
 ```

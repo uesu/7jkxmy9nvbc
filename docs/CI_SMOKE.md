@@ -33,8 +33,8 @@
 * **Offline by design** — it must run on GitHub runners and on any machine
   without the real environment: `aiohttp`, `feedparser` and `dotenv` are
   stubbed if not installed, and no check opens a connection.
-* **Import gate for every engine** — all ten monitor scripts
-  (`main.py`, the X V2/V3 test copies + the `twitter_proxy.py` fallback
+* **Import gate for every engine** — all monitor scripts
+  (`twitter_v1.py`, the X V2/V3 test copies + the `twitter_proxy.py` fallback
   module, Reddit V1/V2/V3, `video_diag.py`) must import without error.
   This is the check that fails on a mangled paste or a breaking dependency
   bump.
