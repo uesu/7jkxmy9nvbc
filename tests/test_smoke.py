@@ -13,7 +13,11 @@ Purpose (also used by CI as the safety gate for Dependabot PRs):
   4. the round-23 (2026-09-18) Reddit V3 rules hold: media must win the
      proxy chain, the Arctic media-hint gate skips WITHOUT caching, the
      removal-notice variants are caught and legit posts are not, and the
-     round-14 miningtcup RSS token is still sent all three ways.
+     round-14 miningtcup RSS token is still sent all three ways,
+  5. the round-28 (2026-09-18) X V2/V3 rules hold: an /en translation
+     IDENTICAL to the original (X language mis-detection) is dropped, and
+     non-ASCII hashtags (zzzero + U+3164 filler) get percent-encoded,
+     clickable URLs.
 """
 import os
 import sys
@@ -1458,6 +1462,57 @@ for label, overrides, expected in [
     exec(_r25_code, scope)
     check('r25 gate: ' + label, scope['allowed'] is expected)
 check('r25 gate never writes dedup cache', 'posted.add' not in _r25_gate)
+
+
+# ---- 5. X V2/V3 round 28 (2026-09-18): translation guard + hashtag URLs ----
+v3r = load_module("smoke_x_v3_r28", "testing area/twitter_v3.py")
+v2r = load_module("smoke_x_v2_r28", "testing area/twitter_v2_button_outside.py")
+
+# 5a. the /en translation identical to the original is a language mis-detection
+check('r28 guard: live misfire (identical translation) detected',
+      v3r.translation_is_identical("Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy",
+                                   "Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy") is True)
+check('r28 guard: case/whitespace/emoji-insensitive compare',
+      v3r.translation_is_identical("  Maintenance   🩸\n#zzzero ", "maintenance 🩸 #zzzero") is True)
+check('r28 guard: real translation is NOT identical (JA cards stay)',
+      v3r.translation_is_identical("クラレッタとおかしな交渉", "Clarettà and the Absurd Negotiation") is False)
+check('r28 guard: one added word is NOT identical',
+      v3r.translation_is_identical("Maintenance 🩸 #zzzero", "Maintenance 🩸 #zzzero #Claret") is False)
+check('r28 guard: None/empty safe',
+      v3r.translation_is_identical(None, None) is True
+      and v3r.translation_is_identical("hi", "") is False
+      and v3r.translation_is_identical(None, "x") is False)
+check('r28 guard: V2 carries the same helper',
+      v2r.translation_is_identical is not None
+      and v2r.translation_is_identical("a B!", "a  b") is True)
+src_v3 = open(os.path.join(ROOT, "testing area", "twitter_v3.py"), encoding="utf-8").read()
+src_v2 = open(os.path.join(ROOT, "testing area", "twitter_v2_button_outside.py"), encoding="utf-8").read()
+check('r28 guard: V3 loop compares before showing the block',
+      "translation_is_identical(original_text, translated_text)" in src_v3
+      and "language mis-detection" in src_v3 and "posting as-is" in src_v3)
+check('r28 guard: V2 loop compares before showing the block',
+      "translation_is_identical(original_text, translated_text)" in src_v2
+      and "language mis-detection" in src_v2 and "posting as-is" in src_v2)
+
+# 5b. non-ASCII hashtags get percent-encoded (clickable) URLs
+check('r28 linkify: pure-ASCII tag byte-identical (zero regression)',
+      v3r.linkify_text("#Claret") == "[#Claret](https://x.com/hashtag/Claret)")
+check("r28 linkify: #zzzero + U+3164 filler -> quoted URL, like X itself links",
+      v3r.linkify_text("#zzzeroㅤ") == "[#zzzeroㅤ](https://x.com/hashtag/zzzero%E3%85%A4)")
+check('r28 linkify: the live 2026-09-18 post renders fully clickable',
+      v3r.linkify_text("Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy")
+      == "Maintenance 🩸\n[#zzzeroㅤ](https://x.com/hashtag/zzzero%E3%85%A4) "
+         "[#Claret](https://x.com/hashtag/Claret) [#Roxy](https://x.com/hashtag/Roxy)")
+check('r28 linkify: accented tag quoted (e.g. French #célébration)',
+      v3r.linkify_text("#célébration") == "[#célébration](https://x.com/hashtag/c%C3%A9l%C3%A9bration)")
+check('r28 linkify: URL #anchor + email still protected',
+      v3r.linkify_text("see example.com/path#anchor and a@b.com")
+      == "see example.com/path#anchor and a@b.com")
+check('r28 linkify: @mention unchanged',
+      v3r.linkify_text("hi @user") == "hi [@user](https://x.com/user)")
+check('r28 linkify: V2 behaves identically to V3',
+      v2r.linkify_text("Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy")
+      == v3r.linkify_text("Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy"))
 
 
 print()
