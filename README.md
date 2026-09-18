@@ -23,7 +23,7 @@ please support them:
 | **EmbedEZ** | Rich Reddit embeds (redditez.com mirror) + the provider API used by Reddit V2 + **last-resort tweet-data source** behind twitterez.com (round 11) | [embedez.com](https://embedez.com/) · [redditez.com](https://embedez.com/reddit) · [twitterez.com](https://twitterez.com) · [API docs](https://embedez.com/docs) |
 | **Embeddit** by [@DeltAndy123](https://github.com/DeltAndy123) | Alternative Reddit embed mirror (credited — its button was removed in the 2026-09-11 trim) | [GitHub](https://github.com/DeltAndy123/Embeddit) |
 | **vxReddit** by [@dylanpdx](https://github.com/dylanpdx) | Alternative Reddit embed mirror (credited — its button was removed in the 2026-09-11 trim) | [GitHub](https://github.com/dylanpdx/vxReddit) · [vxreddit.com](https://vxreddit.com) |
-| **Redlib** (community instances) | Reddit front-end mirrors used as RSS fallback sources — official instance list, refreshed 2026-09-12 | [redlib-instances](https://github.com/redlib-org/redlib-instances) · [redlib](https://github.com/redlib-org/redlib) |
+| **Redlib** (community instances) | Reddit front-end mirrors used as RSS fallback sources — official instance list, refreshed 2026-09-12; **redlib.miningtcup.me** (round 24) joins the V3 fallback fleet | [redlib-instances](https://github.com/redlib-org/redlib-instances) · [redlib](https://github.com/redlib-org/redlib) · [redlib.miningtcup.me](https://redlib.miningtcup.me/) (miningtcup — same operator as the nitter RSS token) |
 | **Arctic Shift** by [@ArthurHeitmann](https://github.com/ArthurHeitmann) | Optional Reddit archive JSON for V3 crosspost originals, ordered galleries including GIFs, text/media fallbacks, and (round 17) the **per-subreddit search backup feed** when RSS yields no new posts. Archive availability and freshness vary; fallback counts are labelled as archived. | [GitHub](https://github.com/ArthurHeitmann/arctic_shift) · [Website](https://arctic-shift.photon-reddit.com/) · [Download tool](https://arctic-shift.photon-reddit.com/download-tool) |
 | **cron-job.org** | Free external scheduler that triggers the workflows reliably every 10 minutes | [cron-job.org](https://cron-job.org) |
 | **GitHub Actions** | Runs everything on a schedule, for free | — |
@@ -870,6 +870,54 @@ title, the body notices are only checked in the first 400 characters,
 and every skip is *not cached* — so a false positive retries and posts
 on a later run instead of being lost.
 
+### 🆕 Reddit V3 — round 24 (2026-09-18): redlib.miningtcup.me joins the fallback fleet
+
+miningtcup — the operator who provided the `nitter.miningtcup.me` RSS
+token — also runs **redlib.miningtcup.me** (a redlib front-end for
+Reddit; confirmed live in a browser 2026-09-18). It now joins
+`REDDIT_RSS_INSTANCES` (after the two reddit.com hosts, ahead of the
+three Anubis-gated instances), so it participates everywhere the redlib
+instances already do: the per-sub RSS fallback chain, the parallel
+post-page gallery harvest, the post's-own RSS feed (test posts), and
+the archive-post liveness check.
+
+**DogWAF + the token.** miningtcup's instances sit behind **DogWAF**,
+their home-made JavaScript-free WAF that auto-passes current browsers
+and challenges scripts. The operator states that DogWAF access tokens
+("passes") given out by one instance are valid on their other
+instances — and the nitter RSS token comes from that same
+infrastructure, so it is very likely such a pass (unverified on redlib;
+the first runs after merge confirm it). The same repo variable
+**`NITTER_RSS_TOKEN`** (already set for the Twitter monitor) is now
+wired into `reddit_monitor_v3.yml` too, and V3 appends it as `?token=`
+to every `redlib.miningtcup.me` request — feeds and post pages alike
+(the query-param convention the operator confirmed for nitter).
+
+* **If the token passes the WAF:** redlib.miningtcup.me becomes a
+  working instance in the fleet — more redundancy for RSS fallback,
+  gallery harvest and the liveness check. Log: `Successfully fetched
+  r/<sub> from https://redlib.miningtcup.me` / `gallery via redlib
+  (https://redlib.miningtcup.me)`. Nothing else changes.
+* **If it doesn't** (the token is scoped to nitter only): the instance
+  just logs a bot-check miss and the chain moves on — exactly the
+  behavior of the Anubis-gated instances today. One email to
+  `nitter-rss@miningtcup.me` / `ted@miningtcup.me` asking for our UA
+  to be whitelisted (they have offered this in their Invidious docs
+  issue) would fix it — no code change needed after.
+* **Nothing else changed:** reddit.com/old.reddit.com stay first, the
+  `?feed=` token still applies to reddit.com hosts only, and every
+  other path (proxies, FULL MODE, YouTube, crossposts, liveness gate,
+  removal filter) runs exactly as before.
+
+**Checked the same day but NOT wired in:** miningtcup's **Invidious**
+instance `inv.miningtcup.me` (the `YOUTUBE_MEDIA_EMBED` candidate).
+The instance is up and current (v2026.09.13; `/api/v1/stats` is
+DogWAF-whitelisted and answers live), but video fetching is broken —
+`/watch?v=Yhf9ur3xPQA` shows Invidious's own error page ("This helps
+protect our community") instead of the player. The operator self-hosts
+and uses it, so this is likely a temporary upstream (YouTube-side)
+problem — revisit if/when playback is fixed.
+
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
 **Step 0 — one-time: archive the OLD Reddit V1/V2 workflow.**
@@ -1425,6 +1473,18 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 
 ## 🗒 Changelog
 
+* **2026-09-18 — Reddit V3 round 24: redlib.miningtcup.me joins the
+  redlib fallback fleet.** miningtcup (the nitter-RSS-token operator)
+  also hosts a redlib instance; it now sits in `REDDIT_RSS_INSTANCES`
+  (after the two reddit.com hosts, ahead of the Anubis-lottery
+  instances) and gets the miningtcup token appended as `?token=` via
+  the new `_with_miningtcup_token` helper at both chokepoints
+  (`_fetch_feed` + `_fetch_redlib_post_page`). `reddit_monitor_v3.yml`
+  now wires the SAME existing `NITTER_RSS_TOKEN` repo variable. If the
+  WAF doesn't accept the token there, the instance logs a bot-check
+  miss and the chain moves on — no behavior change. `inv.miningtcup.me`
+  (Invidious) was checked the same day: up (v2026.09.13) but video
+  fetch broken (Invidious error page on `/watch`) — not wired in.
 * **2026-09-18 — Reddit V3 round 23: media must win the proxy chain (the
   1wj38fc gallery) + removal-notice variants.** `AnantaLeaks/1wj38fc`
   (2-photo spoilered gallery) posted media-less and was cached that way:
