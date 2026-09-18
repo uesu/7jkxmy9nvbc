@@ -918,6 +918,47 @@ protect our community") instead of the player. The operator self-hosts
 and uses it, so this is likely a temporary upstream (YouTube-side)
 problem — revisit if/when playback is fixed.
 
+### 🆕 Reddit V3 — round 25 (2026-09-18): most-complete-media-wins (1wj0p83)
+
+**Reported failure:** `AnantaLeaks/1wj0p83` is a 13-photo gallery that was
+posted with only one photo and cached. The user-reported workflow-log
+reconstruction is: the pre-round-23 run accepted redditez's text-only result
+(0 images), never tried vxreddit/embeddit, failed through the redlib mirrors,
+and ultimately used the first image in the native RSS fallback. This historical
+log reconstruction was supplied by the user, not independently verified here.
+Round 23 addressed text-only early stopping; round 25 also addresses a proxy
+returning **some but not all** media when a later service can return more.
+
+* **C1 — most media wins:** `fetch_proxy_post` compares all eligible proxy
+  services and keeps the largest media list. Ties preserve service priority;
+  20 items reach the card capacity (two galleries of ten) and stop the chain
+  early. The returned winning list is capped to 20 on a copy, leaving the
+  source result unchanged. Health filtering, text-only fallback and video eligibility remain
+  unchanged. Logs show `best so far` and `replacing the winner`.
+* **C2 — known partial archive galleries retry:** if Arctic's valid structured
+  gallery entries outnumber the resolved media, skip without caching. The next
+  scheduled run retries within the existing 48-hour window. The gate applies
+  to archive entries without native post JSON; video cards, explicit test posts
+  and dry runs are exempt, as in the supplied round-25 specification.
+  The existing zero-media gate remains in place.
+
+**Limits:** this improves completeness, not a guarantee. An unfilled Arctic
+record counts as zero and cannot detect a partial gallery when every available
+proxy is also partial. Counts exclude invalid/deleted/unfilled entries. Proxy
+results retain the winning source's order; original Reddit order is available
+from structured gallery data or an ordered redlib harvest, but cannot be inferred
+from an unordered embeddit list alone. No post-specific image ordering is hardcoded.
+
+**Deployment and repair:** after merging this PR in `News-Feed-Embed-Twitter`,
+sync `testing area/reddit_proxy.py` and `testing area/reddit_main_v3.py` to the
+production `News-Feed-Embed-Reddit` repository. The cached card does not repair
+itself. First run that repository's workflow with
+`test_post = AnantaLeaks/1wj0p83` and `dry_run = yes`; inspect the payload for
+all 13 photos and their order. Only after verification, delete the old Discord
+card and run the explicit test post without dry-run. Test posts bypass dedup
+and the archive completeness gate, so do not assume a successful run proves
+all expected media were retrieved.
+
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
 **Step 0 — one-time: archive the OLD Reddit V1/V2 workflow.**
@@ -1472,6 +1513,13 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-18 — Reddit V3 round 25: most-complete-media-wins (1wj0p83).**
+  Proxy chain keeps the largest eligible media list (priority breaks ties;
+  20-item capacity stops early and caps the returned list without mutating
+  the source result). Known partial archive galleries skip without
+  caching and retry within the freshness window. Adds offline regression tests
+  for 1-vs-13 images, ties, fallback, video, capacity, health and archive gates.
 
 * **2026-09-18 — Reddit V3 round 24: redlib.miningtcup.me joins the
   redlib fallback fleet.** miningtcup (the nitter-RSS-token operator)
