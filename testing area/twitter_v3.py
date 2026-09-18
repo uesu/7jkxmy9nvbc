@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
 # ■ Components V2 Edition (Buttons Inside Container) — twitter_v3.py
 # ---------------------------------------------------------------------------
-# This is a separate file — your V1 twitter_v1.py and V2 twitter_v2.py stay untouched.
-# To use it: change the workflow's run line to:  python twitter_v3.py
+# This is a separate file — your V1 twitter_v1.py and V2 twitter_v2_button_outside.py stay untouched.
+# To use it: change the workflow's run line to:  python "testing area/twitter_v3.py"
 #
-# Same behavior as twitter_v2.py, but the action row is NESTED INSIDE the
+# Same behavior as twitter_v2_button_outside.py, but the action row is NESTED INSIDE the
 # type-17 container (all-in-one card look).
 #
 # ■ What's new in this revision (2026-09-11, round 4):

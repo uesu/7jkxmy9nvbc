@@ -466,7 +466,7 @@ async def main():
     if not EMBEDEZ_API_KEY:
         logging.warning("EMBEDEZ_API_KEY is missing — cards will use limited public preview data. "
                         "For full media/stats, add the EMBEDEZ_API_KEY secret (watch your credit balance), "
-                        "or switch the workflow to reddit_main.py (V1, free, no key).")
+                        "or switch the workflow to testing area/reddit_main.py (V1, free, no key).")
     if not REDDIT_FEED_TOKEN:
         logging.warning("REDDIT_FEED_TOKEN not set — running anonymously. The combined feed "
                         "(1 request/run) usually fits the ~1 req/min limit, but add your feed "

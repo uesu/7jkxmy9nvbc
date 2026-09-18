@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
-# ■ Full Components V2 Edition — twitter_v2.py
+# ■ Full Components V2 Edition — twitter_v2_button_outside.py
 # ---------------------------------------------------------------------------
 # This is a separate file — your V1 twitter_v1.py and V3 twitter_v3.py stay untouched.
-# To use it: change the workflow's `run: python twitter_v1.py` line to
-#            `run: python twitter_v2_button_outside.py`
+# To use it: change the workflow's run line to:
+#            run: python "testing area/twitter_v2_button_outside.py"
 #
 # Same behavior as twitter_v3.py, but the action row is a SEPARATE component
 # OUTSIDE/BELOW the type-17 container (classic V2 look).
