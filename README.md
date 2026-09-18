@@ -483,14 +483,23 @@ feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
    (Round 11: the tweet data may instead come from a backup service in the
    fallback chain — see the round-11 section; the `/en` re-fetch below is
    attempted only when the data came from FxTwitter itself.)
-2. If it's not English, it re-fetches `https://api.fxtwitter.com/<account>/status/<id>/en`, which
-   returns FxTwitter's translated text.
+2. If it's not English, it re-fetches the tweet with `/en`, which returns the
+   translation inside a separate `translation` object (`text`, `source_lang`,
+   …) — the original `text`/`lang` fields are left untouched.
 3. The message shows **🌐 Translated from {Language}** then the translation, then an
    **Original text** block with the untranslated tweet. The *Read Post* button points to the `/en`
    fxtwitter page too.
-4. If FxTwitter can't translate a specific post, the script gracefully posts the original text instead.
-5. `LANGUAGE_NAMES` at the top of each file maps ISO codes (ja, ko, zh, fr, …) to readable names —
-   extend it if you track accounts in other languages.
+4. Round 28 (2026-09-18): X's per-tweet `lang` is an automatic guess and
+   misfires on short/ambiguous text (live case: "Maintenance 🩸" + hashtags,
+   tagged `fr` by an ESP/ENG artist). When the `/en` translation comes back
+   IDENTICAL to the original text, the block is dropped and the card posts
+   as-is (logged as "X language mis-detection"); a real translation always
+   differs, so legitimate "Translated from …" cards are unaffected.
+5. If FxTwitter can't translate a specific post, the script gracefully posts the original text instead.
+6. `LANGUAGE_NAMES` at the top of each file maps ISO codes (ja, ko, zh, fr, …) to readable names —
+   extend it if you track accounts in other languages. (V1 note: V1 posts the
+   fxtwitter auto-embed of the original tweet and doesn't do its own `/en`
+   re-fetch, so the guard above only applies to the V2/V3 card engines.)
 
 ## 🎯 Multi-webhook routing
 
@@ -1528,6 +1537,29 @@ Then run any engine:
 ---
 
 ## 🗒 Changelog
+
+* **2026-09-18 — X V2/V3 round 28: bogus "Translated from French" cards +
+  broken non-ASCII hashtag links (two live bugs, one fix each).**
+  1. **Language mis-detection guard:** X's per-tweet `lang` is an automatic
+     guess — live misfire 2026-09-18: `2100794014630846965` ("Maintenance 🩸"
+     + hashtags, from an ESP/ENG artist) was tagged `fr` and `/en` returned a
+     "translation" identical to the original, so the card showed
+     *🌐 Translated from French* for text that never changed. V2/V3 now
+     compare the `/en` translation to the original
+     (`translation_is_identical`, case/whitespace/punctuation/emoji-insensitive):
+     identical → no block, posted as-is, logged (`/en translation is
+     identical to the original — X language mis-detection`); different → the
+     "Translated from X" block exactly as before, so real Japanese/English
+     cards are unaffected. V1 unchanged (documented).
+  2. **Non-ASCII hashtags:** some artists embed non-ASCII characters in tags
+     (the same post's `#zzzero` carries U+3164 HANGUL FILLER: `zzzeroㅤ`).
+     `linkify_text` captured the full tag (correct) but built a URL with the
+     raw character, which Discord's markdown parser rejects, so the card
+     printed the literal `[#zzzero  ](https://x.com/hashtag/zzzero )`.
+     Hashtag URLs are now percent-encoded
+     (`https://x.com/hashtag/zzzero%E3%85%A4` — the exact page X itself links
+     to); pure-ASCII tags are byte-identical, and accented tags
+     (e.g. `#célébration`) now link too. @mentions unchanged.
 
 * **2026-09-18 — Reddit V3 round 25: most-complete-media-wins (1wj0p83).**
   Proxy chain keeps the largest eligible media list (priority breaks ties;
