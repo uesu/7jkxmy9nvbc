@@ -91,9 +91,7 @@ and to [@dangered wolf](https://github.com/dangeredwolf), creator and lead devel
 │   ├── dependabot.yml             # Dependabot: weekly pip + actions update PRs (optional)
 │   └── workflows/
 │       ├── twitter_monitor.yml    # X/Twitter — runs testing area/twitter_v3.py (V3)
-│       ├── reddit_monitor.yml     # ⚠️ OLD Reddit V1/V2 workflow — ARCHIVE it (Actions tab),
-│       │                          #    see "Testing & verification" — superseded by V3
-│       ├── reddit_monitor_v3.yml  # Reddit V3 (ACTIVE) — runs testing area/reddit_main_v3test.py
+│       ├── reddit_monitor_v3.yml  # Reddit V3 (ACTIVE) — runs testing area/reddit_main_v3.py
 │       ├── ci.yml                 # PR gate: install + compile + offline smoke test
 │       └── dependabot_auto_merge.yml  # opt-in auto-merge for Dependabot PRs (repo Variable)
 ├── docs/
@@ -122,12 +120,13 @@ and to [@dangered wolf](https://github.com/dangeredwolf), creator and lead devel
 └── .gitignore                     # (keep the posted_*.json force-add exception in workflow)
 ```
 
-> **Promotion note:** the production root copies of the X V2/V3 and Reddit V1/V2/V3
-> engines do not exist yet — by design, everything runs from `testing area/` first.
-> When a test copy passes, copy it to the root (`main_v2.py`, `main_v3.py`,
-> `reddit_main.py`, `reddit_main_v2.py`, `reddit_main_v3.py`) and point the
-> workflow's `run:` line at the copy (the V3 promotion steps are in the testing
-> guide below).
+> **Engine layout note:** by default, production workflows run proven engines directly
+> from their canonical paths (`twitter_v1.py` at repo root, `testing area/twitter_v3.py`,
+> and `testing area/reddit_main_v3.py`). You can switch engines at any time by editing the
+> workflow's `run:` line to point to the desired file (`twitter_v1.py`,
+> `testing area/twitter_v2_button_outside.py`, `testing area/twitter_v3.py`,
+> `testing area/reddit_main.py`, `testing area/reddit_main_v2_embedez.py`, or
+> `testing area/reddit_main_v3.py`).
 
 ---
 
@@ -135,22 +134,19 @@ and to [@dangered wolf](https://github.com/dangeredwolf), creator and lead devel
 
 Every new or changed script is proven **before** it touches production. The process:
 
-1. **The updated script lives in the `testing area/` folder first** (e.g. `testing area/reddit_maintest.py`,
-   `testing area/main_v3testproround10.py`, `testing area/reddit_main_v3test.py`). Never run an unproven script from the repo root.
+1. **The updated script lives in the `testing area/` folder first** (e.g. `testing area/reddit_main_v3.py`,
+   `testing area/twitter_v3.py`). Never run an unproven script from the repo root.
 2. **Point the workflow's `run:` line at the test copy.** The **double quotes are required** because
    the folder name contains a space:
    ```yaml
-   run: python "testing area/reddit_maintest.py"
+   run: python "testing area/reddit_main_v3.py"
    ```
 3. **Check two things:**
    - the actual post(s) in Discord (layout, buttons, media), **and**
    - the workflow log (Actions tab) — every skipped source/instance is logged there.
-4. **Once both look right, copy the test file over the production file**
-   (`reddit_main.py`, `reddit_main_v2.py`, `main.py`, `main_v2.py`, `main_v3.py`) and point the
-   `run:` line back at it:
-   ```yaml
-   run: python reddit_main.py
-   ```
+4. **Once both look right, point the workflow's `run:` line to your preferred active engine:**
+   - For X/Twitter: `twitter_v1.py`, `"testing area/twitter_v2_button_outside.py"`, or `"testing area/twitter_v3.py"`
+   - For Reddit: `"testing area/reddit_main.py"`, `"testing area/reddit_main_v2_embedez.py"`, or `"testing area/reddit_main_v3.py"`
 5. Commit. Production is updated; the test file can stay or be deleted.
 
 > The same guidance is written as a comment block inside both workflow yml files, right above the
@@ -165,20 +161,20 @@ Every new or changed script is proven **before** it touches production. The proc
 All three do the same job with the same multi-webhook routing and translation — they only differ in
 **how the Discord message looks**:
 
-| | `main.py` (V1) | `main_v2.py` (V2) | `main_v3.py` (V3) |
+| | `twitter_v1.py` (V1) | `twitter_v2_button_outside.py` (V2) | `twitter_v3.py` (V3 — **current**) |
 |---|---|---|---|
 | Message style | Plain text + fxtwitter link → Discord **auto-unfurls** the embed | Fully custom **Components V2** bordered card (type 17 container + text + media gallery + stats) | Same custom card as V2 |
 | Buttons | Action row below the embed | Action row **outside/below** the container | Action row **nested inside** the container |
 | Data source | RSS + FxTwitter API (light, lang check only) | RSS + FxTwitter API (full tweet JSON) | RSS + FxTwitter API (full tweet JSON) |
 | Custom accent color | n/a | ✅ (per-tweet `color`) | ✅ (per-tweet `color`) |
-| Switch to it | `run: python main.py` | `run: python main_v2.py` | `run: python main_v3.py` |
+| Switch to it | `run: python twitter_v1.py` | `run: python "testing area/twitter_v2_button_outside.py"` | `run: python "testing area/twitter_v3.py"` |
 
 **To switch versions:** open `.github/workflows/twitter_monitor.yml` and change the run line:
 
 ```yaml
-run: python main.py        # V1
-# run: python main_v2.py   # V2
-# run: python main_v3.py   # V3
+# run: python twitter_v1.py                              # V1
+# run: python "testing area/twitter_v2_button_outside.py" # V2
+run: python "testing area/twitter_v3.py"                 # V3 (active)
 ```
 
 Commit — done. All three were verified working end-to-end (feeds, translation, per-channel routing,
@@ -537,10 +533,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -567,8 +563,8 @@ jobs:
           NITTER_RSS_TOKEN: ${{ secrets.NITTER_RSS_TOKEN }}
         # While testing a new version, point this line at the test copy instead
         # (QUOTES REQUIRED — the folder name has a space):
-        #   run: python "testing area/main_v3test.py"
-        run: python main_v3.py   # ← switch to main.py / main_v2.py here
+        #   run: python "testing area/twitter_v3.py"
+        run: python "testing area/twitter_v3.py"   # ← switch to twitter_v1.py / twitter_v2_button_outside.py here
 
       - name: Commit and push updated posted_tweets.json cache
         run: |
@@ -609,14 +605,14 @@ Discord channel.
 
 ## Choosing a version (V1 vs V2 vs V3)
 
-| | `reddit_main.py` (V1) | `reddit_main_v2.py` (V2) | `reddit_main_v3.py` (V3 — **current**) |
+| | `reddit_main.py` (V1) | `reddit_main_v2_embedez.py` (V2) | `reddit_main_v3.py` (V3 — **current**) |
 |---|---|---|---|
 | Cost | **Free — no API key at all** | Requires an **EmbedEZ API key** (paid credits — see concerns below) | **Free — no API key at all** (Reddit's own media URLs) |
 | Look | Plain message + `redditez.com` link → Discord auto-embeds it (same idea as fxtwitter), plus a bare YouTube link with its own playable embed when detected | Rich **Components V2** card built from EmbedEZ data | Same rich **Components V2** card, built from **Reddit's own URLs** |
 | Media | Whatever the mirror unfurls | Up to 10 media items via EmbedEZ | **Every photo** (up to 20 → 2 containers), best rendition per photo (full-res `i.redd.it` for jpgs); video posts show the **video only**; never a silent video |
 | YouTube | Bare link (auto-embeds) + conditional button | Clickable line + button | **Thumbnail + animated `starwardspark3` button** (deterministic); optional real playback via `YOUTUBE_MEDIA_EMBED=1` |
 | Extra | — | — | 💬/👍 stats + **💬 OP comment** (FULL MODE), true crosspost embeds (fetches the original post), native `v.redd.it` video chain, **Discohook preview link** logged per card |
-| Switch to it | `run: python reddit_main.py` | `run: python reddit_main_v2.py` | `run: python reddit_main_v3.py` (production copy; the tested copy lives in `testing area/`) |
+| Switch to it | `run: python "testing area/reddit_main.py"` | `run: python "testing area/reddit_main_v2_embedez.py"` | `run: python "testing area/reddit_main_v3.py"` |
 
 ### 🆕 Reddit V3 — what's different (round 12, 2026-09-15)
 
@@ -964,14 +960,14 @@ all expected media were retrieved.
 
 ### 🧪 Reddit V3 — final testing & verification procedure (round 12)
 
-**Step 0 — one-time: archive the OLD Reddit V1/V2 workflow.**
-In the **Actions** tab, open the workflow named **"Reddit Feed Monitor"**
-(the old V1 one, `reddit_monitor.yml`) → its three-dot menu →
-**Archive workflow**. It targets the same test channels and the same
+**Step 0 — one-time: archive the OLD Reddit V1/V2 workflow (if previously enabled).**
+In the **Actions** tab, if the old workflow named **"Reddit Feed Monitor"**
+(the old V1 one, formerly `reddit_monitor.yml`, now replaced by `reddit_monitor_v3.yml`) is listed → its three-dot menu →
+**Archive workflow**. It targeted the same channels and the same
 `posted_reddit.json` dedup cache as V3, so every time GitHub's native cron
-fires it, it would post the same new post in the OLD plain style and
+fired it, it would post the same new post in the OLD plain style and
 "steal" it from V3. (Your external cron-job.org trigger should point at
-**"Reddit Feed V3 Monitor"** — the V3 one — not this one.)
+**"Reddit Feed V3 Monitor"** — `reddit_monitor_v3.yml` — not the old one.)
 
 Everything is triggered from the repo's **Actions** tab → workflow
 **"Reddit Feed V3 Monitor"** → the **Run workflow** button (branch `main`).
@@ -1016,14 +1012,14 @@ channel check:
   confirm it has **audio** (if it plays silent, report it — the ladder is
   dropped with a one-line change)
 
-**Step 4 — Promotion (only after the test channel looks right)**
+**Step 4 — Active engine & switching**
 
-1. Copy `testing area/reddit_main_v3test.py` to the repo root as
-   `reddit_main_v3.py`.
-2. In `.github/workflows/reddit_monitor_v3.yml`, change the run line to
-   `python "reddit_main_v3.py"`.
-3. Commit. V1/V2 files stay untouched (the promotion path is documented in
-   the yml comments).
+By default, `.github/workflows/reddit_monitor_v3.yml` runs the active V3 engine:
+`python "testing area/reddit_main_v3.py"`.
+To switch to V1 or V2, change the run line in `.github/workflows/reddit_monitor_v3.yml`:
+* `run: python "testing area/reddit_main.py"` (V1, free mirror link)
+* `run: python "testing area/reddit_main_v2_embedez.py"` (V2, rich card via EmbedEZ key)
+* `run: python "testing area/reddit_main_v3.py"` (V3, native rich card, no key)
 
 ### Secrets
 
@@ -1048,15 +1044,24 @@ with none of them set):
 | `DISCOHOOK_PREVIEW` | on | `0` = don't create/log the per-card Discohook share-link preview |
 | `FEEDTOKEN_JSON_STAGGER` | `65` | seconds between feed-token `.json` attempts (lower only if your token reliably works there) |
 
-### The workflow (`.github/workflows/reddit_monitor.yml`)
+### The workflow (`.github/workflows/reddit_monitor_v3.yml`)
 
 ```yaml
-name: Reddit Feed Monitor
+name: Reddit Feed V3 Monitor
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
-  workflow_dispatch:
+  workflow_dispatch:          # allows manual + external-cron triggering
+    inputs:
+      test_post:
+        description: 'Optional TEST POST: rebuild ONE specific post, e.g. AnantaLeaks/1wgvcz7 (native RSS/redlib fallback if the post JSON 403s). Leave empty for a normal run.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run: build + log the payloads, but do NOT post to Discord and do NOT save the cache. Useful before promoting.'
+        type: choice
+        options: ['no', 'yes']
+        required: false
+        default: 'no'
 
 permissions:
   contents: write
@@ -1066,10 +1071,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7   # v7 = Node 24 runtime (v4/v5 ran on deprecated Node 20)
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -1079,34 +1084,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Reddit Feed Monitor
+      - name: Run Reddit V3 Feed Monitor
         env:
           SUBREDDITS: ${{ secrets.SUBREDDITS }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          EMBEDEZ_API_KEY: ${{ secrets.EMBEDEZ_API_KEY }}
-          REDDIT_FEED_TOKEN: ${{ secrets.REDDIT_FEED_TOKEN }}   # optional (recommended) — your feed token
+          REDDIT_FEED_TOKEN: ${{ secrets.REDDIT_FEED_TOKEN }}   # your Reddit feed token (recommended — old.reddit.com -> Preferences -> Feeds)
+          NITTER_RSS_TOKEN: ${{ secrets.NITTER_RSS_TOKEN }}     # miningtcup token (stored as secret to mask from logs)
+          TEST_POST_ID: ${{ github.event.inputs.test_post }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'yes' }}
           WEBHOOK_REDDIT_ZENLESSZONEZEROLEAKS_: ${{ secrets.WEBHOOK_REDDIT_ZENLESSZONEZEROLEAKS_ }}
           WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS: ${{ secrets.WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS }}
           WEBHOOK_REDDIT_HONKAISTARRAIL_LEAKS: ${{ secrets.WEBHOOK_REDDIT_HONKAISTARRAIL_LEAKS }}
           WEBHOOK_REDDIT_WUTHERINGWAVESLEAKS: ${{ secrets.WEBHOOK_REDDIT_WUTHERINGWAVESLEAKS }}
           WEBHOOK_REDDIT_HONKAINEXUSANIMALEAKS: ${{ secrets.WEBHOOK_REDDIT_HONKAINEXUSANIMALEAKS }}
           WEBHOOK_REDDIT_ANANTALEAKS: ${{ secrets.WEBHOOK_REDDIT_ANANTALEAKS }}
-          REDDIT_MIRROR: ${{ vars.REDDIT_MIRROR }}   # optional (V1): blank/omitted = redditez.com
         # While testing a new version, point this line at the test copy instead
         # (QUOTES REQUIRED — the folder name has a space):
-        #   run: python "testing area/reddit_maintest.py"
-        run: python reddit_main.py   # ← switch to reddit_main_v2.py for the rich card
+        #   run: python "testing area/reddit_main_v3.py"
+        # Switch between engines:
+        #   run: python "testing area/reddit_main.py"            <- plain V1 (free, mirror link)
+        #   run: python "testing area/reddit_main_v2_embedez.py"  <- rich card (EmbedEZ key)
+        run: python "testing area/reddit_main_v3.py"   # ← V3 (proxy media + native fallback)
 
-      - name: Commit and push updated posted_reddit.json cache
+      - name: Commit and push updated caches (posted_reddit.json + proxy_health.json)
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add -f posted_reddit.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update posted_reddit.json cache" && git push)
+          git add -f posted_reddit.json proxy_health.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update posted_reddit.json + proxy_health.json caches" && git push)
 ```
 
 Create `posted_reddit.json` with `[]` as its initial content (first run posts only the newest item,
-by design).
+by design). Proxy warm-up states are tracked in `proxy_health.json`.
 
 ## 🆕 Reddit behaviors (2026-09-11 update)
 
@@ -1120,8 +1129,8 @@ by design).
   1. Repo → **Settings → Secrets and variables → Actions → *Variables* tab** → new variable
      **`REDDIT_MIRROR`** = `embeddit.deltandy.me` or `vxreddit.com` (full `https://…/` URLs are
      tolerated; they're normalized down to the host).
-  2. In `reddit_monitor.yml` make sure the env block contains
-     `REDDIT_MIRROR: ${{ vars.REDDIT_MIRROR }}` (it already does in the sample above).
+  2. In `reddit_monitor_v3.yml` make sure the env block contains
+     `REDDIT_MIRROR: ${{ vars.REDDIT_MIRROR }}` (if running V1).
   3. Next run uses the new mirror. Switch back anytime by setting the variable to `redditez.com`
      (or deleting it).
   **Reddit V2 needs nothing** — it fetches post data from the EmbedEZ API and builds its own
@@ -1359,7 +1368,7 @@ author's "Manually run by …" pattern with a free external cron:
 2. Sign up at [cron-job.org](https://cron-job.org) (free) and create a job **per workflow**:
    * **URL:**
      `https://api.github.com/repos/<YOU>/<REPO>/actions/workflows/twitter_monitor.yml/dispatches`
-     (and a second job for `reddit_monitor.yml`)
+     (and a second job for `reddit_monitor_v3.yml`)
    * **Method:** `POST` · **Crontab:** `*/10 * * * *`
    * **Headers:**
      | Key | Value |
@@ -1390,7 +1399,7 @@ For any **new or updated script**, test it from the `testing area/` folder first
 ## (Optional) Render Cron instead of GitHub Actions
 
 Create a **Cron Job** on Render: build `pip install -r requirements.txt`, command
-`python main.py` (or any other engine file), schedule `*/10 * * * *`, and add the same env vars there.
+`python "testing area/twitter_v3.py"` (or `python twitter_v1.py` / any other engine file), schedule `*/10 * * * *`, and add the same env vars there.
 
 ---
 
@@ -1420,14 +1429,16 @@ WEBHOOK_REDDIT_HONKAINEXUSANIMALEAKS=https://discord.com/api/webhooks/...
 WEBHOOK_REDDIT_ANANTALEAKS=https://discord.com/api/webhooks/...
 REDDIT_MIRROR=redditez.com   # optional, V1 only: embeddit.deltandy.me | vxreddit.com
 EMBEDEZ_API_KEY=ez_...       # Reddit V2 only
+NITTER_RSS_TOKEN=            # optional — unlocks token-gated nitter/redlib instances
 REDDIT_FEED_TOKEN=           # optional (recommended) — old.reddit.com/prefs/feeds, the ?feed= value
 ```
 
-Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py` /
-`python reddit_main.py` / `python reddit_main_v2.py`.
+Then run any engine:
+* **X/Twitter:** `python twitter_v1.py` / `python "testing area/twitter_v2_button_outside.py"` / `python "testing area/twitter_v3.py"`
+* **Reddit:** `python "testing area/reddit_main.py"` / `python "testing area/reddit_main_v2_embedez.py"` / `python "testing area/reddit_main_v3.py"`
 
 > When a script sits in `testing area/`, quote the path (the space):
-> `python "testing area/reddit_maintest.py"`.
+> `python "testing area/reddit_main_v3.py"`.
 
 ---
 
@@ -1494,8 +1505,8 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
 * **A portrait/vertical video loads but won't play right after posting** — this was a transient
   Discord proxy warm-up behavior (the same URLs play fine shortly after, confirmed across services).
   Direct URLs are the default again since round 5. If you ever confirm a *persistent* portrait
-  breakage, set `PORTRAIT_PROXY = True` near the top of `main_v2.py`/`main_v3.py` to route vertical
-  videos through FxTwitter's embed proxy instead.
+  breakage, set `PORTRAIT_PROXY = True` near the top of `testing area/twitter_v2_button_outside.py` /
+  `testing area/twitter_v3.py` to route vertical videos through FxTwitter's embed proxy instead.
 * **EmbedEZ suddenly errors after an update** — expected risk (their docs warn of breaking changes);
   the Actions log prints the raw API response to help adjust field names.
 * **Combined feed returns "no RSS entries" / `429`** — Reddit's "loading takes a moment" HTML page or
@@ -1880,7 +1891,7 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
     enabled.
   * **Docs:** "image not found" recovery steps (transient Discord proxy failure on old messages —
     delete message + remove its cache line + re-run; re-posting always works).
-  * **X V1 (`main.py`)** — default `ACCOUNTS` list now includes `Ananta_EN` (matches V2/V3);
+  * **X V1 (`twitter_v1.py`, formerly `main.py`)** — default `ACCOUNTS` list now includes `Ananta_EN` (matches V2/V3);
     header comment tidy-up only. No behavior changes.
 * **2026-09-13 — round 9:**
   * **Reddit reliability (live-verified):** primary fetch is now **ONE combined feed request**
@@ -1907,7 +1918,7 @@ Then run any engine: `python main.py` / `python main_v2.py` / `python main_v3.py
     `Genshin_Impact_Leaks`, `HonkaiStarRail_leaks`, `WutheringWavesLeaks`, `HonkaiNexusAnimaLeaks`,
     `AnantaLeaks` (all verified live/active). Matching per-sub secrets
     (`WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS` … `WEBHOOK_REDDIT_ANANTALEAKS`) documented, and the
-    sample `reddit_monitor.yml`/`.env` updated.
+    sample `reddit_monitor_v3.yml`/`.env` updated.
   * **Switchable V1 embed mirror:** new optional **`REDDIT_MIRROR`** repo Variable — `redditez.com`
     (default), `embeddit.deltandy.me`, or `vxreddit.com`. All three were verified live to accept
     the same post path and serve embed meta to Discordbot. Host normalization tolerates full URLs.
