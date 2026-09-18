@@ -181,7 +181,7 @@
 #   20. (round 24, 2026-09-18) MININGTCUP REDLIB: redlib.miningtcup.me
 #       joins REDDIT_RSS_INSTANCES (RSS + post pages everywhere the
 #       redlib instances already run). It sits behind the operator's
-#       DogWAF anti-bot, so the miningtcup token (repo variable
+#       DogWAF anti-bot, so the miningtcup token (repo secret
 #       NITTER_RSS_TOKEN — same value the Twitter monitor uses) is
 #       appended as ?token= on this host via _with_miningtcup_token
 #       (both chokepoints: _fetch_feed + _fetch_redlib_post_page). If
