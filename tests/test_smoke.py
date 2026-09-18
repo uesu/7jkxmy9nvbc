@@ -815,6 +815,34 @@ for _rel, _label in (("testing area/twitter_v3.py", "X V3"),
     check(f"r14 {_label}: ?token= query param kept",
           "?token={url_quote(token, safe='')}" in _src)
 
+# ---- round 24 (2026-09-18): redlib.miningtcup.me + DogWAF token helper ----
+def _r24_miningtcup_checks(mod):
+    # round 24: redlib.miningtcup.me in the fleet + DogWAF token helper
+    check("r24 fleet: redlib.miningtcup.me joins REDDIT_RSS_INSTANCES",
+          "https://redlib.miningtcup.me" in mod.REDDIT_RSS_INSTANCES,
+          str(mod.REDDIT_RSS_INSTANCES))
+    saved = mod.MININGTCUP_TOKEN
+    try:
+        mod.MININGTCUP_TOKEN = "abc123-token"
+        u = mod._with_miningtcup_token("https://redlib.miningtcup.me/r/X/new/.rss")
+        check("r24 token: ?token= appended (no existing query)",
+              u == "https://redlib.miningtcup.me/r/X/new/.rss?token=abc123-token", u)
+        u = mod._with_miningtcup_token("https://redlib.miningtcup.me/r/X/comments/Y?foo=1")
+        check("r24 token: &token= appended (existing query)",
+              u == "https://redlib.miningtcup.me/r/X/comments/Y?foo=1&token=abc123-token", u)
+        u = mod._with_miningtcup_token("https://safereddit.com/r/X/new/.rss")
+        check("r24 token: other hosts untouched",
+              u == "https://safereddit.com/r/X/new/.rss", u)
+        mod.MININGTCUP_TOKEN = ""
+        u = mod._with_miningtcup_token("https://redlib.miningtcup.me/r/X/new/.rss")
+        check("r24 token: empty token is a no-op",
+              u == "https://redlib.miningtcup.me/r/X/new/.rss", u)
+    finally:
+        mod.MININGTCUP_TOKEN = saved
+
+
+_r24_miningtcup_checks(v3)
+
 # ---- round 11: X V3 tweet-data fallback chain (twitter_proxy) -------------
 tpx = None
 try:
