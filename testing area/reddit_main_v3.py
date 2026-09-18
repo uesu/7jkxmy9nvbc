@@ -178,6 +178,18 @@
 #       round-15 cascade repair also outputs the bare URL now.
 #       Descriptive links ('[text](URL)', text != URL), prose and
 #       lines with mangle residue stay byte-identical.
+#   20. (round 24, 2026-09-18) MININGTCUP REDLIB: redlib.miningtcup.me
+#       joins REDDIT_RSS_INSTANCES (RSS + post pages everywhere the
+#       redlib instances already run). It sits behind the operator's
+#       DogWAF anti-bot, so the miningtcup token (repo variable
+#       NITTER_RSS_TOKEN — same value the Twitter monitor uses) is
+#       appended as ?token= on this host via _with_miningtcup_token
+#       (both chokepoints: _fetch_feed + _fetch_redlib_post_page). If
+#       the WAF doesn't accept it the instance logs a bot-check miss
+#       and the chain moves on — no behavior change. inv.miningtcup
+#       .me (Invidious) was checked the same day: up (v2026.09.13) but
+#       video fetch broken (Invidious error page on /watch) — NOT
+#       wired in; revisit once playback is fixed.
 #
 # ■ WORKFLOW: identical to V1/V2. Test-area first:
 #   run: python "testing area/reddit_main_v3.py"
@@ -212,6 +224,14 @@ DEFAULT_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 # .json endpoints (workaround for the 2026 datacenter JSON wall — see header).
 REDDIT_FEED_TOKEN = os.getenv("REDDIT_FEED_TOKEN", "").strip()
 
+# round 24 (2026-09-18): miningtcup's DogWAF token — the SAME value as the
+# Twitter repo's NITTER_RSS_TOKEN (their nitter RSS token is a DogWAF
+# "pass" and the operator says passes from one instance are valid on the
+# others — unverified on redlib, so if it doesn't pass the WAF the instance
+# just logs a bot-check miss and the chain moves on). Appended as ?token=
+# on redlib.miningtcup.me requests only.
+MININGTCUP_TOKEN = os.getenv("NITTER_RSS_TOKEN", "").strip()
+
 # OPTIONAL (FULL MODE, path a): Reddit script app credentials.
 # reddit.com/prefs/apps -> create another app -> type "script" ->
 # redirect http://localhost. Client ID = under the app name; secret via the
@@ -234,6 +254,12 @@ MAX_AGE_SECONDS = 48 * 3600
 REDDIT_RSS_INSTANCES = [
     "https://www.reddit.com",
     "https://old.reddit.com",
+    # round 24 (2026-09-18): miningtcup's redlib (the operator behind the
+    # nitter.miningtcup.me RSS token). Behind their DogWAF anti-bot — the
+    # miningtcup token below is appended as ?token= on this host; if the
+    # operator scoped it to nitter only, it logs a bot-check miss and the
+    # chain moves on, exactly like the Anubis instances below.
+    "https://redlib.miningtcup.me",
     "https://safereddit.com",           # 2026-09-13: Anubis bot check (fallback lottery)
     "https://red.artemislena.eu",       # 2026-09-13: Anubis bot check (fallback lottery)
     "https://redlib.privacyredirect.com",  # 2026-09-13: Anubis bot check (fallback lottery)
@@ -1106,12 +1132,23 @@ def clean_rss_body(value: str | None) -> str:
 # ---------------------------------------------------------------------------
 # ■ RSS FEED FETCHING (identical logic to V1/V2 — combined feed primary)
 # ---------------------------------------------------------------------------
+def _with_miningtcup_token(url: str) -> str:
+    """round 24: append the DogWAF token for miningtcup hosts — their WAF
+    reads ?token= (same convention the operator confirmed for nitter).
+    No-op for other hosts or when the token is empty."""
+    if MININGTCUP_TOKEN and "miningtcup.me" in url:
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}token={MININGTCUP_TOKEN}"
+    return url
+
+
 async def _fetch_feed(session: aiohttp.ClientSession, feed_url: str, label: str):
     """
     GETs one feed URL with two 429 retries (6s, then 45s). A response is only
     accepted if it is HTTP 200, contains real feedparser entries, and those
     entries carry reddit /comments/ permalinks. Every rejection is logged.
     """
+    feed_url = _with_miningtcup_token(feed_url)   # round 24: DogWAF token
     headers = {
         **BROWSER_HEADERS,
         "Accept": "application/rss+xml, application/xml, text/xml, */*",
@@ -1721,7 +1758,8 @@ async def fetch_test_post_base(session: aiohttp.ClientSession, path: str,
 async def _fetch_redlib_post_page(session: aiohttp.ClientSession, instance: str,
                                   path: str, timeout: int = 10) -> str | None:
     try:
-        async with session.get(f"{instance}{path}", headers=BROWSER_HEADERS,
+        async with session.get(_with_miningtcup_token(f"{instance}{path}"),
+                               headers=BROWSER_HEADERS,
                                timeout=aiohttp.ClientTimeout(total=timeout),
                                allow_redirects=True) as resp:
             if resp.status == 200 and "html" in (resp.headers.get("Content-Type") or "").lower():
