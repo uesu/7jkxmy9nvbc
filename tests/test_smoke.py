@@ -717,7 +717,7 @@ check("r23 1wj38fc: text-only vxreddit does not stop the chain — embeddit's ph
 proxy._fetch_redditez = _r23_photos
 _r23b = asyncio.run(proxy.fetch_proxy_post(None, "/r/Sub/comments/abc/",
                                            label="t", health={}))
-check("r23 media-first: a service with media still wins immediately",
+check("r23 media-first: equal media counts keep the earlier result",
       _r23b and _r23b["service"] == "embeddit" and len(_r23b["media"]) == 2, str(_r23b))
 
 proxy._fetch_redditez, proxy._fetch_vxreddit, proxy._fetch_embeddit = (
@@ -1361,6 +1361,103 @@ asyncio.run(_r20_gate())
 
 asyncio.run(round15_flows())
 asyncio.run(round15_fetch())
+
+
+# ---- round 25: most-complete proxy media and archive count --------------
+async def _r25_proxy_checks():
+    names = ('redditez', 'vxreddit', 'embeddit')
+    saved = [getattr(proxy, '_fetch_' + name) for name in names]
+    async def run(counts, *, video=False, need_video=False, health=None):
+        calls = []
+        results = []
+        for index, (name, count) in enumerate(zip(names, counts)):
+            result = {'service': name, 'body': name, 'stats': None,
+                      'media': [{'kind': 'video' if video and index == 1 else 'image',
+                                 'url': f'https://i.redd.it/{i}.jpg'} for i in range(count)]}
+            results.append(result)
+            async def fake(session, path, label='', result=result, name=name):
+                calls.append(name)
+                return result
+            setattr(proxy, '_fetch_' + name, fake)
+        winner = await proxy.fetch_proxy_post(None, '/r/AnantaLeaks/comments/1wj0p83/',
+                                               need_video=need_video, health=health)
+        return winner, calls, results
+    try:
+        winner, calls, results = await run((1, 1, 13))
+        check('r25 1wj0p83: embeddit wins with all 13 items',
+              winner == results[2] and len(winner['media']) == 13 and len(calls) == 3)
+        check('r25 winner preserves source image order', winner['media'] == results[2]['media'])
+        winner, calls, results = await run((0, 1, 13))
+        check('r25 text/partial/full: embeddit wins after text-only redditez',
+              winner == results[2] and calls == list(names))
+        winner, _, results = await run((0, 2, 0), need_video=True)
+        check('r25 need_video: no video keeps first non-video fallback', winner is results[0])
+        winner, calls, results = await run((25, 13, 1))
+        check('r25 over-cap: 25 items trimmed to 20 and chain stops',
+              winner['service'] == 'redditez' and len(winner['media']) == 20
+              and calls == ['redditez'])
+        check('r25 cap preserves order and leaves original result untouched',
+              winner is not results[0] and len(results[0]['media']) == 25
+              and winner['media'] == results[0]['media'][:20]
+              and winner['media'] is not results[0]['media'])
+        winner, _, results = await run((2, 2, 1))
+        check('r25 equal counts preserve priority', winner == results[0])
+        winner, _, results = await run((0, 0, 0))
+        check('r25 text-only fallback remains first', winner == results[0])
+        winner, _, results = await run((13, 1, 20), video=True, need_video=True)
+        check('r25 need_video: video beats larger thumbnail lists', winner == results[1])
+        winner, calls, results = await run((20, 1, 13))
+        check('r25 capacity: later services never called',
+              winner == results[0] and calls == ['redditez'])
+        winner, calls, results = await run((1, 2, 13), health={'embeddit': {'ok': False}})
+        check('r25 health: marked-down service skipped', winner == results[1] and len(calls) == 2)
+        winner, calls, results = await run((1, 2, 13), health={n: {'ok': False} for n in names})
+        check('r25 health: all down retries every service', winner == results[2] and len(calls) == 3)
+    finally:
+        for name, original in zip(names, saved):
+            setattr(proxy, '_fetch_' + name, original)
+
+asyncio.run(_r25_proxy_checks())
+_r25_ids = ['wc0hxdxq94qh1', '1mmykk4r94qh1', 'wlm8yl7r94qh1', 'aibof0er94qh1',
+            'w8wlkxjr94qh1', '2kau5umr94qh1', '404l58pr94qh1', '00ccvmrr94qh1',
+            'xly043yr94qh1', 'unvdfv0s94qh1', 'jhzodb3s94qh1', 'rtaidu5s94qh1', 'rfbchq8s94qh1']
+_r25_post = {'gallery_data': {'items': [{'media_id': mid} for mid in _r25_ids]},
+             'media_metadata': {mid: {'status': 'valid', 'e': 'Image',
+                                     's': {'u': f'https://i.redd.it/{mid}.jpg'}} for mid in _r25_ids}}
+check('r25 Arctic count: 13 valid gallery entries', v3._arctic_media_count(_r25_post) == 13)
+check('r25 Arctic extractor preserves original gallery order',
+      [m['url'] for m in v3.arctic_gallery_items(_r25_post)] ==
+      [f'https://i.redd.it/{mid}.jpg' for mid in _r25_ids])
+for value in (None, {}, {'gallery_data': {}, 'media_metadata': {}}, {'url': 'https://i.redd.it/a.jpg'}):
+    check('r25 Arctic count: empty/non-gallery is unknown (0)', v3._arctic_media_count(value) == 0)
+_r25_post['media_metadata'][_r25_ids[0]]['status'] = 'failed'
+check('r25 Arctic count: invalid entry excluded', v3._arctic_media_count(_r25_post) == 12)
+
+# Execute the actual main-loop gate in a tiny loop: continue means retry,
+# reaching the sentinel means posting can proceed. No network/cache writes.
+import textwrap
+_r25_gate = inspect.getsource(v3.main).split('# Round 25: known partial', 1)[1]
+_r25_gate = _r25_gate[_r25_gate.index('                if ('):].split('                posted_ts =', 1)[0]
+_r25_code = 'for _ in [0]:\n' + textwrap.indent(textwrap.dedent(_r25_gate), '    ') + '    allowed = True\n'
+for label, overrides, expected in [
+    ('partial gallery retries', {}, False),
+    ('complete gallery proceeds', {'data': {'media': [{'kind': 'image'}] * 12}}, True),
+    ('unknown count proceeds', {'entry': types.SimpleNamespace(_arctic_post={})}, True),
+    ('video exempt', {'data': {'media': [{'kind': 'video'}]}}, True),
+    ('test post exempt', {'TEST_POST_ID': 'AnantaLeaks/1wj0p83'}, True),
+    ('dry run exempt', {'DRY_RUN': True}, True),
+    ('native JSON exempt', {'post_json': {}}, True),
+    ('non-archive exempt', {'entry': object()}, True),
+]:
+    scope = dict(TEST_POST_ID='', DRY_RUN=False, post_json=None,
+                 entry=types.SimpleNamespace(_arctic_post=_r25_post),
+                 _ArcticEntry=types.SimpleNamespace, data={'media': [{'kind': 'image'}]},
+                 _arctic_media_count=v3._arctic_media_count, logging=__import__('logging'),
+                 unique_key='r25-test', allowed=False)
+    scope.update(overrides)
+    exec(_r25_code, scope)
+    check('r25 gate: ' + label, scope['allowed'] is expected)
+check('r25 gate never writes dedup cache', 'posted.add' not in _r25_gate)
 
 
 print()
