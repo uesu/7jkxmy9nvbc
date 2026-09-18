@@ -266,12 +266,39 @@ def linkify_text(text: str) -> str:
         @user     -> [@user](https://x.com/user)
     Lookbehinds protect URLs (example.com/path#anchor) and emails (a@b.com).
     Bare http(s) links in the text are already auto-linked by Discord.
+    Round 28 (2026-09-18): the hashtag is percent-encoded in the link
+    target — some artists put non-ASCII characters inside tags (live case:
+    #zzzero + U+3164 HANGUL FILLER, zzzeroㅤ), and the raw character made
+    Discord's markdown parser reject the link (literal [#tag ](...) text
+    printed). The URL now matches exactly what X itself links to
+    (x.com/hashtag/zzzero%E3%85%A4): pure ASCII, always clickable.
     """
     if not text:
         return ""
-    text = re.sub(r"(?<![\w/])#(\w+)", r"[#\1](https://x.com/hashtag/\1)", text)
+    def _link_hashtag(match: "re.Match") -> str:
+        tag = match.group(1)
+        return f"[#{tag}](https://x.com/hashtag/{url_quote(tag, safe='')})"
+
+    text = re.sub(r"(?<![\w/])#(\w+)", _link_hashtag, text)
     text = re.sub(r"(?<![\w@/])@([A-Za-z0-9_]{1,15})", r"[@\1](https://x.com/\1)", text)
     return text
+
+
+def translation_is_identical(original: str, translated: str) -> bool:
+    """round 28 (2026-09-18): X's per-tweet `lang` is an automatic language
+    GUESS, and it misfires on short/ambiguous text — e.g. 'Maintenance 🩸
+    #zzzero #Claret #Roxy' (one word that exists in several languages +
+    hashtags) came back as lang=fr. The /en call still answers with a
+    `translation` object, but its text is the SAME as the original (the
+    translator had nothing to change), so posting it as 'Translated from
+    French' is wrong. This compares the two texts case/whitespace/
+    punctuation/emoji-insensitively: if they are the same, the card is
+    posted as-is (no translation block). A real translation always differs."""
+    def _norm(s: str) -> str:
+        s = (s or "").lower()
+        s = re.sub(r"[^\w]+", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
+    return _norm(original) == _norm(translated)
 
 
 def chunk_text(text: str, max_components: int = MAX_TEXT_COMPONENTS) -> list:
@@ -1049,14 +1076,24 @@ async def main():
                         translation = translated_data["translation"]
                         translated_text = translation.get("text", tweet_data.get("text", ""))
                         original_text = tweet_data.get("text", "")
-                        lang_name = LANGUAGE_NAMES.get(lang, lang.upper())
-                        display_text = (
-                            f"🌐 Translated from {lang_name}\n\n"
-                            f"{translated_text}\n\n"
-                            f"**Original text**\n{original_text}"
-                        )
-                        tweet_data = translated_data
-                        read_post_url += "/en"
+                        # round 28 (2026-09-18): X's per-tweet `lang` is an
+                        # automatic GUESS and it misfires (live case
+                        # 2100794014630846965: "Maintenance 🩸" + hashtags
+                        # from an ESP/ENG artist tagged lang=fr). When /en
+                        # returns a translation IDENTICAL to the original,
+                        # post as-is instead of a bogus "Translated from X"
+                        # block. Real translations always differ -> unchanged.
+                        if translation_is_identical(original_text, translated_text):
+                            logging.info(f"[{unique_key}] /en translation is identical to the original — X language mis-detection (lang={lang}), posting as-is.")
+                        else:
+                            lang_name = LANGUAGE_NAMES.get(lang, lang.upper())
+                            display_text = (
+                                f"🌐 Translated from {lang_name}\n\n"
+                                f"{translated_text}\n\n"
+                                f"**Original text**\n{original_text}"
+                            )
+                            tweet_data = translated_data
+                            read_post_url += "/en"
                 # ------------------------------------------------
 
                 # --- media gallery (videos probed/ported/GIF'd) ---
