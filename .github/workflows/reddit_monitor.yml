@@ -44,7 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Reddit V3 Feed Monitor
+      - name: Run Reddit Feed Monitor
         env:
           SUBREDDITS: ${{ secrets.SUBREDDITS }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
