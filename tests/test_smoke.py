@@ -27,8 +27,11 @@ Purpose (also used by CI as the safety gate for Dependabot PRs):
 import os
 import sys
 import json
+import time
 import types
+import shutil
 import inspect
+import tempfile
 import importlib.util
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1462,7 +1465,10 @@ for label, overrides, expected in [
                  entry=types.SimpleNamespace(_arctic_post=_r25_post),
                  _ArcticEntry=types.SimpleNamespace, data={'media': [{'kind': 'image'}]},
                  _arctic_media_count=v3._arctic_media_count, logging=__import__('logging'),
-                 unique_key='r25-test', allowed=False)
+                 unique_key='r25-test', allowed=False,
+                 # round 30 (2026-09-19): the gate now also records the post in
+                 # the pending-recheck cache before `continue`.
+                 pending={}, now=1758240000.0, mark_pending=v3.mark_pending)
     scope.update(overrides)
     exec(_r25_code, scope)
     check('r25 gate: ' + label, scope['allowed'] is expected)
@@ -1624,6 +1630,149 @@ check("r29 header: no crosspost -> no 🔁 line",
           "AnantaLeaks", dict(_R29_BASE, crosspost=None),
           "https://www.reddit.com/r/AnantaLeaks/comments/1abc/", 1789749533)
           ["components"][0]["components"][0]["content"])
+
+
+# ---- round 30 (2026-09-19): pending-post recheck cache --------------------
+# The four skip gates now record the post in pending_reddit.json and a
+# pending post is re-verified at most once every PENDING_RECHECK_SECONDS.
+check("r30 defaults: 30-min recheck, 48h prune window",
+      v3.PENDING_RECHECK_SECONDS == 1800
+      and v3.PENDING_MAX_AGE_SECONDS == 48 * 3600
+      and v3.PENDING_FILE == "pending_reddit.json")
+
+_r30_now = 1758240000.0
+_r30_pending = {}
+v3.mark_pending(_r30_pending, "Sub_abc", "media_wait", _r30_now)
+check("r30 mark_pending: new entry records first_seen/last_checked/reason",
+      _r30_pending["Sub_abc"] == {"first_seen": _r30_now,
+                                  "last_checked": _r30_now,
+                                  "reason": "media_wait"}, str(_r30_pending))
+v3.mark_pending(_r30_pending, "Sub_abc", "not_live", _r30_now + 3600)
+check("r30 mark_pending: re-mark keeps first_seen, updates last_checked/reason",
+      _r30_pending["Sub_abc"] == {"first_seen": _r30_now,
+                                  "last_checked": _r30_now + 3600,
+                                  "reason": "not_live"}, str(_r30_pending))
+
+check("r30 due: unknown key is always due",
+      v3.pending_due(_r30_pending, "Sub_new", _r30_now) is True)
+check("r30 due: just-checked post is NOT due (no network this run)",
+      v3.pending_due(_r30_pending, "Sub_abc", _r30_now + 3600 + 60) is False)
+check("r30 due: due again once PENDING_RECHECK_SECONDS have passed",
+      v3.pending_due(_r30_pending, "Sub_abc",
+                     _r30_now + 3600 + v3.PENDING_RECHECK_SECONDS) is True)
+check("r30 due: corrupt entry is treated as due (fail-open, never drops a post)",
+      v3.pending_due({"Sub_x": "garbage"}, "Sub_x", _r30_now) is True)
+
+# save_pending: prunes >48h entries, keeps the rest, writes sorted JSON
+_r30_dir = tempfile.mkdtemp()
+_r30_cwd = os.getcwd()
+try:
+    os.chdir(_r30_dir)
+    _r30_save = {
+        "Zed_new": {"first_seen": time.time(), "last_checked": time.time(), "reason": "media_wait"},
+        "Abc_new": {"first_seen": time.time(), "last_checked": time.time(), "reason": "not_live"},
+        "Old_gone": {"first_seen": time.time() - (49 * 3600),
+                     "last_checked": time.time(), "reason": "not_live"},
+        "Bad_entry": "not-a-dict",
+    }
+    v3.save_pending(_r30_save)
+    with open(v3.PENDING_FILE, "r", encoding="utf-8") as _fh:
+        _r30_written = json.load(_fh)
+    check("r30 save_pending: entries older than 48h are pruned",
+          "Old_gone" not in _r30_written, str(_r30_written))
+    check("r30 save_pending: non-dict junk dropped",
+          "Bad_entry" not in _r30_written, str(_r30_written))
+    check("r30 save_pending: live entries kept",
+          set(_r30_written) == {"Abc_new", "Zed_new"}, str(_r30_written))
+    check("r30 save_pending: keys sorted (byte-stable file, no churn commits)",
+          list(_r30_written) == ["Abc_new", "Zed_new"], str(list(_r30_written)))
+    check("r30 load_pending: round-trips what save_pending wrote",
+          v3.load_pending() == _r30_written)
+    with open(v3.PENDING_FILE, "w", encoding="utf-8") as _fh:
+        _fh.write("[]")
+    check("r30 load_pending: non-dict JSON falls back to {}", v3.load_pending() == {})
+    with open(v3.PENDING_FILE, "w", encoding="utf-8") as _fh:
+        _fh.write("{ broken")
+    check("r30 load_pending: corrupt JSON falls back to {}", v3.load_pending() == {})
+    os.remove(v3.PENDING_FILE)
+    check("r30 load_pending: missing file is {} (first run)", v3.load_pending() == {})
+finally:
+    os.chdir(_r30_cwd)
+    shutil.rmtree(_r30_dir, ignore_errors=True)
+
+# The main loop: throttle placement + every gate records pending + saves
+_r30_main = inspect.getsource(v3.main)
+check("r30 main: pending cache loaded next to the dedup cache",
+      "pending = load_pending()" in _r30_main)
+_r30_throttle = _r30_main.split("pending-post recheck throttle", 1)[-1].split("if entry is not None:", 1)[0]
+for _cond in ("not TEST_POST_ID", "not DRY_RUN", "unique_key in pending",
+              "not pending_due(pending, unique_key, now)"):
+    check(f"r30 throttle keeps condition: {_cond}", _cond in _r30_throttle, _r30_throttle)
+check("r30 throttle: skips with `continue` and never caches as posted",
+      _r30_throttle.rstrip().endswith("continue") and "posted.add" not in _r30_throttle,
+      _r30_throttle)
+check("r30 throttle runs BEFORE any network work (the whole point)",
+      _r30_main.index("pending-post recheck throttle")
+      < _r30_main.index("post_json = await fetch_post_json"))
+check("r30 gates: all four skip paths record a pending entry",
+      _r30_main.count("mark_pending(pending, unique_key") == 4
+      and 'mark_pending(pending, unique_key, "media_wait", now)' in _r30_main
+      and 'mark_pending(pending, unique_key, "partial_gallery", now)' in _r30_main,
+      str(_r30_main.count("mark_pending(pending, unique_key")))
+check("r30 posted: a successful post clears the pending entry",
+      "pending.pop(unique_key, None)" in _r30_main)
+check("r30 save: pending cache saved on BOTH exit paths (quiet + normal)",
+      _r30_main.count("save_pending(pending)") == 2)
+_r30_dry = _r30_main.rsplit("if DRY_RUN:", 1)[-1].split("else:", 1)[0]
+check("r30 DRY RUN branch still writes neither cache",
+      "save_posted" not in _r30_dry and "save_pending" not in _r30_dry, _r30_dry)
+
+# P1: twitter cache dumped sorted -> identical id set = identical bytes
+_r30_x = load_module("smoke_x_v3_r30", "testing area/twitter_v3.py")
+_r30_xdir = tempfile.mkdtemp()
+try:
+    os.chdir(_r30_xdir)
+    _r30_ids = {"2100555373073797461", "2100555373073797999", "2100555373073797123"}
+    _r30_x.save_posted_urls(set(_r30_ids))
+    with open(_r30_x.CACHE_FILE, "r", encoding="utf-8") as _fh:
+        _r30_first = _fh.read()
+    _r30_x.save_posted_urls(set(reversed(sorted(_r30_ids))))
+    with open(_r30_x.CACHE_FILE, "r", encoding="utf-8") as _fh:
+        _r30_second = _fh.read()
+    check("r30 P1: same id set dumps byte-identical (no junk cache commits)",
+          _r30_first == _r30_second, f"{_r30_first!r} vs {_r30_second!r}")
+    check("r30 P1: ids written in sorted order",
+          json.loads(_r30_first) == sorted(_r30_ids), _r30_first)
+    _r30_many = {str(2100555373073790000 + i) for i in range(_r30_x.MAX_CACHE_SIZE + 25)}
+    _r30_x.save_posted_urls(_r30_many)
+    with open(_r30_x.CACHE_FILE, "r", encoding="utf-8") as _fh:
+        _r30_trim = json.load(_fh)
+    check("r30 P1: trim keeps the NEWEST MAX_CACHE_SIZE ids",
+          len(_r30_trim) == _r30_x.MAX_CACHE_SIZE
+          and _r30_trim == sorted(_r30_many)[-_r30_x.MAX_CACHE_SIZE:]
+          and _r30_trim[-1] == max(_r30_many, key=int), str(_r30_trim[:2]))
+finally:
+    os.chdir(_r30_cwd)
+    shutil.rmtree(_r30_xdir, ignore_errors=True)
+
+# P0: concurrency groups guard both production monitors
+for _wf, _group in ((".github/workflows/reddit_monitor.yml", "check-reddit-"),
+                    (".github/workflows/twitter_monitor.yml", "check-twitter-")):
+    with open(os.path.join(ROOT, _wf), "r", encoding="utf-8") as _fh:
+        _wf_src = _fh.read()
+    check(f"r30 P0 {os.path.basename(_wf)}: concurrency group present",
+          "concurrency:" in _wf_src and _group in _wf_src, _wf_src[:200])
+    check(f"r30 P0 {os.path.basename(_wf)}: cancel-in-progress is false "
+          "(a cancelled run could lose its cache commit and re-post)",
+          "cancel-in-progress: false" in _wf_src
+          and "cancel-in-progress: true" not in _wf_src)
+with open(os.path.join(ROOT, ".github/workflows/reddit_monitor.yml"), "r",
+          encoding="utf-8") as _fh:
+    _r30_wf = _fh.read()
+check("r30 P3: workflow commits pending_reddit.json with the other caches",
+      "git add -f posted_reddit.json proxy_health.json pending_reddit.json" in _r30_wf)
+check("r30 P3: pending_reddit.json exists at the repo root for the checkout",
+      os.path.exists(os.path.join(ROOT, "pending_reddit.json")))
 
 
 print()
