@@ -66,7 +66,7 @@ def load_module(name, path):
 
 # ---- 1. every monitor script must import --------------------------------
 SCRIPTS = [
-    "twitter_v1.py",
+    "testing area/twitter_v1.py",
     "testing area/reddit_main.py",
     "testing area/reddit_main_v2_embedez.py",
     "testing area/reddit_main_v3.py",
