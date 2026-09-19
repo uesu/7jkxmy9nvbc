@@ -17,7 +17,12 @@ Purpose (also used by CI as the safety gate for Dependabot PRs):
   5. the round-28 (2026-09-18) X V2/V3 rules hold: an /en translation
      IDENTICAL to the original (X language mis-detection) is dropped, and
      non-ASCII hashtags (zzzero + U+3164 filler) get percent-encoded,
-     clickable URLs.
+     clickable URLs,
+  6. the round-29 (2026-09-19) Reddit V3 rules hold: the mirror's
+     crosspost NOTICE is stripped from empty-selftext crossposts (and the
+     notice's subreddit still yields the "🔁 Crosspost of" line when no
+     permalink was available), and one photo listed twice under different
+     wrapper URLs collapses to a single gallery tile.
 """
 import os
 import sys
@@ -1513,6 +1518,112 @@ check('r28 linkify: @mention unchanged',
 check('r28 linkify: V2 behaves identically to V3',
       v2r.linkify_text("Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy")
       == v3r.linkify_text("Maintenance 🩸\n#zzzeroㅤ #Claret #Roxy"))
+
+
+# ---- round 29 (2026-09-19): crosspost notice + same-file media dedupe ----
+# 6a. the mirror's crosspost NOTICE is stripped (it is not post content), and
+#     its subreddit is recovered for the "🔁 Crosspost of" line
+check("r29 notice: live glued case -> empty body + r/AnantaStation",
+      v3._crosspost_notice_clean(
+          "Original PostPosted in r/AnantaStationLemon Recording Studio via Dremka",
+          "Lemon Recording Studio via Dremka") == ("", "AnantaStation"),
+      str(v3._crosspost_notice_clean(
+          "Original PostPosted in r/AnantaStationLemon Recording Studio via Dremka",
+          "Lemon Recording Studio via Dremka")))
+check("r29 notice: classic 'Crosspost of [Sub](url) Subreddit' -> empty + sub",
+      v3._crosspost_notice_clean(
+          "Crosspost of [Ananta2027](https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood_restaurant_by_asiqami/) Subreddit",
+          "Ufood restaurant by Asiqami") == ("", "Ananta2027"),
+      "see r29 harness")
+check("r29 notice: plain 'Crosspost of r/Sub' -> empty + sub",
+      v3._crosspost_notice_clean("Crosspost of r/Ananta2027 Subreddit", "t")
+      == ("", "Ananta2027"))
+check("r29 notice: a real body is untouched",
+      v3._crosspost_notice_clean("Some real post text here", "Some real post text here")
+      == ("Some real post text here", None))
+check("r29 notice: lone 'Original Post' mention untouched (weak evidence)",
+      v3._crosspost_notice_clean("Original Post", "Some other title")
+      == ("Original Post", None))
+check("r29 notice: None/empty safe",
+      v3._crosspost_notice_clean(None, "t") == (None, None)
+      and v3._crosspost_notice_clean("", "t") == ("", None))
+
+# 6b. one photo listed under two wrapper URLs -> ONE gallery tile
+_R29_EMB1 = ("https://embedez.com/api/v2/redirect/"
+             "search_6aad7b5a912fdcacf6d35d99?path=content.media.0.source")
+_R29_EMB2 = ("https://embedez.com/api/v2/redirect/"
+             "search_6aad7b5a912fdcacf6d35d99?path=content.media.1.source")
+_R29_FINAL = "https://i.redd.it/0uf8xxe54bqh1.png"
+
+
+async def _r29_dedupe_checks():
+    async def _resolve(url):
+        return _R29_FINAL
+    items = [{"kind": "image", "url": _R29_EMB1}, {"kind": "image", "url": _R29_EMB2}]
+    out = await v3._dedupe_media_final_urls(None, items, resolve=_resolve)
+    check("r29 dedupe: two embedez redirects of the SAME photo -> 1 item",
+          len(out) == 1 and out[0]["url"] == _R29_EMB1, str(out))
+    items2 = [{"kind": "image", "url": "https://i.redd.it/slug-v0-aaaa.jpg?width=1080&s=x"},
+              {"kind": "image", "url": "https://preview.redd.it/slug-v0-aaaa.jpg?width=1080&s=x"}]
+    out2 = await v3._dedupe_media_final_urls(None, items2)
+    check("r29 dedupe: i.redd.it + signed preview, same file id -> 1 item",
+          len(out2) == 1 and out2[0]["url"].startswith("https://i.redd.it/"), str(out2))
+    items3 = [{"kind": "image", "url": "https://i.redd.it/aaaa.jpg"},
+              {"kind": "image", "url": "https://i.redd.it/bbbb.jpg"}]
+    out3 = await v3._dedupe_media_final_urls(None, items3)
+    check("r29 dedupe: two different photos stay", len(out3) == 2, str(out3))
+
+    async def _fail_resolve(url):
+        return None
+    out4 = await v3._dedupe_media_final_urls(None, [dict(x) for x in items],
+                                             resolve=_fail_resolve)
+    check("r29 dedupe: resolver failure -> both kept (never drop media)",
+          len(out4) == 2, str(out4))
+
+
+asyncio.run(_r29_dedupe_checks())
+
+# 6c. the "🔁 Crosspost of" header lines
+_R29_BASE = {"title": "T", "author": "a", "body": "b", "media": [],
+             "stats": None, "youtube_url": None, "op_comment": None,
+             "youtube_id": None, "youtube_live": False}
+
+
+def _r29_header(crosspost):
+    data = dict(_R29_BASE, crosspost=crosspost)
+    p = v3.build_v3_payload("AnantaLeaks", data,
+                            "https://www.reddit.com/r/AnantaLeaks/comments/1abc/",
+                            1789749533)
+    return p["components"][0]["components"][0]["content"]
+
+
+check("r29 header: clean crosspost URL -> exact legacy line (regression)",
+      _r29_header({"url": "https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/",
+                   "path": "/r/Ananta2027/comments/1wk5ymh/ufood/"})
+      .endswith("\n*🔁 Crosspost of [Ananta2027]"
+                "(https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/) Subreddit*"),
+      _r29_header({"url": "https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/",
+                   "path": "/r/Ananta2027/comments/1wk5ymh/ufood/"}))
+check("r29 header: markdown-wrapped URL unwrapped to the bare URL",
+      "*🔁 Crosspost of [Ananta2027]"
+      "(https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/) Subreddit*"
+      in _r29_header({"url": "[https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/]"
+                             "(https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/)",
+                      "path": ""}),
+      _r29_header({"url": "[https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/]"
+                          "(https://www.reddit.com/r/Ananta2027/comments/1wk5ymh/ufood/)",
+                   "path": ""}))
+check("r29 header: notice-only detection -> linked r/Sub line",
+      "*🔁 Crosspost of [r/AnantaStation]"
+      "(https://www.reddit.com/r/AnantaStation/) Subreddit*"
+      in _r29_header({"url": "", "path": "", "subreddit": "AnantaStation"}),
+      _r29_header({"url": "", "path": "", "subreddit": "AnantaStation"}))
+check("r29 header: no crosspost -> no 🔁 line",
+      "🔁" not in _r29_header(None)
+      if False else "🔁" not in v3.build_v3_payload(
+          "AnantaLeaks", dict(_R29_BASE, crosspost=None),
+          "https://www.reddit.com/r/AnantaLeaks/comments/1abc/", 1789749533)
+          ["components"][0]["components"][0]["content"])
 
 
 print()
