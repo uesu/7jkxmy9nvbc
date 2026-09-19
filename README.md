@@ -1538,6 +1538,43 @@ Then run any engine:
 
 ## 🗒 Changelog
 
+* **2026-09-19 — Reddit V3 round 29: crosspost card cleanup — the
+  mirror's crosspost notice is no longer the body, one photo listed
+  twice under different URLs is one tile, and the 🔁 line is always
+  shown.** (Live: `AnantaLeaks/1wjv962`, a crosspost of
+  `AnantaStation/1wjv8r7` — "Lemon Recording Studio via Dremka".)
+  A crosspost's own text is EMPTY, so the mirror (redditez/EmbedEZ)
+  filled the card's body with its crosspost *notice* — `Original
+  PostPosted in r/AnantaStationLemon Recording Studio via Dremka`
+  (notice fragments glued without spaces + the original's title) —
+  and listed the same single photo TWICE (two og:image redirect URLs
+  for `content.media.0` / `content.media.1`, both resolving to the
+  same `i.redd.it` file). The 🔁 line was missing too: the post was
+  too new for any permalink (no "crosspost" link in the RSS body,
+  Arctic not captured yet). Now:
+  1. **Notice stripping** (`_crosspost_notice_clean`): a body that is
+     ONLY the mirror's crosspost notice ("posted in r/…" / "Crosspost
+     of [Sub](url)" fragments, with or without the original's title
+     glued on) is removed — real body text is never touched, and a
+     mere "original post" mention alone is left alone (weak evidence
+     never triggers).
+  2. **Crosspost line fallback:** when the notice names the original
+     subreddit and no permalink is available anywhere, the card still
+     gets `🔁 Crosspost of [r/Sub](https://www.reddit.com/r/Sub/)
+     Subreddit`; a permalink handed back markdown-wrapped as
+     `[url](url)` is unwrapped to the bare URL. Clean crossposts render
+     the byte-identical old line.
+  3. **Same-file media dedupe** (`_dedupe_media_final_urls`): before
+     the gallery cap, redirect-style media URLs are resolved (HEAD,
+     follows redirects, 8 s best-effort) and only the first item per
+     final file is kept — a photo served under two wrapper URLs is one
+     tile. Applies to EVERY source (proxy/redlib/RSS/Arctic); a URL
+     that fails to resolve is never dropped.
+  14 new offline smoke checks (section 6) cover notice stripping,
+  dedupe and the header lines. The approved Ananta2027 card (🔁 line,
+  unique media, clean body) is the reference for all future
+  crossposts, all subreddits.
+
 * **2026-09-18 — X V2/V3 round 28: bogus "Translated from French" cards +
   broken non-ASCII hashtag links (two live bugs, one fix each).**
   1. **Language mis-detection guard:** X's per-tweet `lang` is an automatic
