@@ -1,4 +1,4 @@
-name: Reddit Feed V3 Monitor
+name: Reddit Feed Monitor
 
 on:
   # ── GITHUB NATIVE SCHEDULE: DISABLED (2026-09-17) ────────────────────────
