@@ -465,6 +465,78 @@ def find_crosspost_original_path(text: str | None, own_path: str | None = None) 
     return None
 
 
+def _crosspost_notice_clean(body: str | None, title: str | None) -> tuple:
+    """Round 29 (2026-09-19): a crosspost's own selftext is EMPTY — the
+    mirror fills the gap with a CROSSPOST NOTICE instead of content, e.g.
+    redditez/EmbedEZ served og:description
+    "Original PostPosted in r/AnantaStationLemon Recording Studio via Dremka"
+    (notice fragments glued without spaces + the original's title; live
+    2026-09-19, crosspost 1wjv962). That notice is not post content: strip
+    it, and return the original's subreddit when the notice names one, so
+    the card can still show its "🔁 Crosspost of" line when no permalink was
+    available (the RSS text carried no 'crosspost' link and Arctic hadn't
+    captured the post yet). Returns (cleaned_body, subreddit_or_None).
+    """
+    if not body or not body.strip():
+        return body, None
+    low = body.lower()
+    norm_title = re.sub(r"\s+", " ", str(title or "")).strip().lower()
+
+    # "posted in r/…" (greedy) — in glued text the run swallows the start of
+    # the title ("…r/AnantaStation" + "Lemon …" with no separator); peel the
+    # longest title-prefix off the subreddit match and remember it so the
+    # strip step can put it back into the text.
+    sub_raw = None
+    sub_true = None
+    m = re.search(r"(?i)posted\s+in\s+r/([A-Za-z0-9_]{2,21})", body)
+    if m:
+        sub_raw = m.group(1)
+        sub_true = sub_raw
+        if norm_title:
+            for L in range(min(len(norm_title), len(sub_raw) - 1), 1, -1):
+                if sub_raw.lower().endswith(norm_title[:L]):
+                    sub_true = sub_raw[:len(sub_raw) - L]
+                    break
+    sub_mark = None
+    m2 = re.search(r"(?i)crosspost\w*\s+(?:of|from)\s+"
+                   r"(?:\[([^\]]+)\]\([^)]*\)|r/?\s*([A-Za-z0-9_]{2,21})\b)", body)
+    if not sub_true:
+        if m2:
+            sub_mark = (m2.group(1) or m2.group(2) or "").strip().lstrip("r/")
+
+    def _strip(b: str) -> str:
+        s = b
+        if sub_raw is not None:
+            stolen = sub_raw[len(sub_true or sub_raw):]
+            s = re.sub(r"(?i)posted\s+in\s+r/" + re.escape(sub_raw),
+                       " " + stolen, s, count=1)
+        else:
+            s = re.sub(r"(?i)posted\s+in\s+r/[A-Za-z0-9_]{2,21}", " ", s)
+        s = re.sub(r"(?i)original\s*post(?![a-z])", " ", s)
+        s = re.sub(r"(?i)crosspost\w*\s+(?:of|from)\s+"
+                   r"(?:\[[^\]]+\]\([^)]*\)|r/?\s*[A-Za-z0-9_]{2,21})\s*(?:subreddit)?",
+                   " ", s)
+        return re.sub(r"\s{2,}", " ", s).strip()
+
+    specific = ("posted in r/" in low
+                or re.search(r"crosspost\w*\s+(?:of|from)\s+(?:\[|r/?)", low))
+    # a weak "original post" mention alone never triggers — only when what
+    # remains after stripping is exactly the original's title echo.
+    if not specific and not (norm_title and "original post" in low
+                             and _strip(body) == norm_title):
+        return body, None
+    orig_sub = sub_true if sub_true is not None else sub_mark
+    cleaned = _strip(body)
+    if norm_title:
+        if cleaned.lower() == norm_title:
+            cleaned = ""  # all that was left was the original's title echo
+        elif specific and cleaned.lower().startswith(norm_title):
+            # notice + title + real text glued together: drop the notice and
+            # the title echo, keep the real text
+            cleaned = cleaned[len(norm_title):].strip(" \t,.;:-")
+    return cleaned, orig_sub
+
+
 def _subreddit_by_name(name: str) -> str | None:
     for sub in SUBREDDITS:
         if sub.lower() == (name or "").lower():
@@ -1885,6 +1957,63 @@ def entry_to_base_data(entry) -> dict:
     }
 
 
+async def _dedupe_media_final_urls(session: aiohttp.ClientSession, media: list,
+                                   resolve=None) -> list:
+    """Round 29 (2026-09-19): drop media items that are the SAME file served
+    under different wrapper URLs. Mirrors can list one photo twice — e.g.
+    redditez/EmbedEZ emitted og:image redirects for BOTH content.media.0.source
+    and content.media.1.source of the same single-image post (live 2026-09-19:
+    crosspost 1wjv962 posted the same 1247x932 collage twice). The i.redd.it
+    file-id dedupe (reddit_proxy.dedupe_proxy_media) can't see through
+    redirect wrappers, so each redirect-style URL is resolved to its final
+    target (HEAD, follow redirects, best-effort) and only the first item per
+    final file is kept. A URL that fails to resolve is kept — a network
+    hiccup must never drop media. `resolve` is injectable for offline tests;
+    only redirect-style URLs are resolved (reddit CDN URLs are canonical).
+    """
+    if len(media) <= 1:
+        return list(media)
+
+    def _file_key(u: str):
+        m2 = re.match(r"https?://(?:i|preview)\.redd\.it/([\w.-]+\.(?:jpe?g|png|gif|webp))",
+                      u or "", re.I)
+        if not m2:
+            return None
+        return re.sub(r"^.+-v\d+-", "", m2.group(1).lower())
+
+    async def _default_resolve(url: str):
+        try:
+            async with session.head(url, allow_redirects=True,
+                                    timeout=aiohttp.ClientTimeout(total=8),
+                                    headers={"User-Agent": "Discordbot/2.0"}) as resp:
+                return str(resp.url)
+        except Exception:
+            return None
+
+    resolver = resolve or _default_resolve
+    out = []
+    seen = set()
+    for m in media:
+        url = m.get("url", "")
+        key = _file_key(url)
+        if key is None and ("/redirect" in url or "search_" in url):
+            try:
+                final = await resolver(url)
+            except Exception:
+                final = None
+            if final:
+                key = _file_key(final) or final
+        if key is None:
+            key = url
+        if key in seen:
+            logging.info(f"media dedupe: dropped {url[:120]!r} — same file as an "
+                         f"earlier gallery item (mirror listed it twice).")
+            continue
+        seen.add(key)
+        out.append(m)
+    return out
+
+
 async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                              post_json: dict | None,
                              path: str | None = None, label: str = "") -> dict:
@@ -2243,6 +2372,22 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 media.append({"kind": "image", "url": yt_thumb})
 
     body = _drop_youtube_line(body, yt_url)
+    # round 29 (2026-09-19): a crosspost with an empty selftext gets the
+    # mirror's crosspost NOTICE as its "body" (e.g. "Original PostPosted in
+    # r/AnantaStation" + the original's title, glued — redditez's og:
+    # description, live 1wjv962). Strip it; when no permalink was available
+    # (RSS text had no 'crosspost' link, Arctic not captured yet), the
+    # notice's subreddit still yields the "🔁 Crosspost of" line.
+    body, _notice_sub = _crosspost_notice_clean(body, title)
+    if not crosspost and _notice_sub:
+        crosspost = {"url": "", "path": "", "subreddit": _notice_sub}
+        logging.info(f"[{label or 'native'}] crosspost detected via the mirror's "
+                     f"notice (original subreddit r/{_notice_sub}) — notice text "
+                     f"removed from the body.")
+    # round 29 (2026-09-19): mirrors can list ONE photo under two different
+    # wrapper URLs (two og:image redirects resolving to the same file) —
+    # collapse to one tile. Applies to EVERY source (proxy/redlib/RSS/Arctic).
+    media = await _dedupe_media_final_urls(session, media)
     media = media[:MAX_GALLERIES * MEDIA_PER_GALLERY]
     return {
         "title": title,
@@ -2288,14 +2433,30 @@ def build_v3_payload(subreddit: str, data: dict, reddit_url: str, posted_ts: int
     """
     header = f"### [{_clean_post_title(data['title'])}]({reddit_url})\n*by {_clean_author_name(data['author'])} in r/{subreddit}*"
     if data["crosspost"]:
-        _cp_sub = re.search(r"/r/([^/]+)/", data["crosspost"].get("path") or "")
+        _cp = data["crosspost"]
+        _cp_url = _cp.get("url") or ""
+        # round 29 (2026-09-19): a mirror can hand the permalink back already
+        # wrapped as a markdown link "[url](url)" — the card link needs the
+        # BARE url (a nested link breaks Discord's markdown).
+        _m = re.search(r"https?://[^\s\)\]]+", _cp_url)
+        if _m:
+            _cp_url = _m.group(0)
+        _cp_sub = re.search(r"/r/([^/]+)/", _cp.get("path") or "")
         if not _cp_sub:
-            _cp_sub = re.search(r"/r/([^/]+)/", data["crosspost"].get("url") or "")
-        if _cp_sub:
+            _cp_sub = re.search(r"/r/([^/]+)/", _cp_url)
+        if not _cp_sub and _cp.get("subreddit"):
+            # round 29: notice-only detection (no permalink available anywhere)
+            _sub = _cp["subreddit"]
+            header += (f"\n*🔁 Crosspost of [r/{_sub}]"
+                       f"(https://www.reddit.com/r/{_sub}/) Subreddit*")
+        elif _cp_sub and _cp_url:
             header += (f"\n*🔁 Crosspost of [{_cp_sub.group(1)}]"
-                       f"({data['crosspost']['url']}) Subreddit*")
+                       f"({_cp_url}) Subreddit*")
+        elif _cp_sub:
+            header += (f"\n*🔁 Crosspost of [r/{_cp_sub.group(1)}]"
+                       f"(https://www.reddit.com/r/{_cp_sub.group(1)}/) Subreddit*")
         else:
-            header += f"\n*🔁 Crosspost of {data['crosspost']['url']}*"
+            header += f"\n*🔁 Crosspost of {_cp_url or 'the original post'}*"
 
     media = data["media"]
     stats = data["stats"]
