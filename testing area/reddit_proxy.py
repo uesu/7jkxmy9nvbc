@@ -891,10 +891,28 @@ def load_proxy_health() -> dict:
 
 
 def save_proxy_health(health: dict):
-    """Writes proxy_health.json (auto-committed by the workflow)."""
+    """Writes proxy_health.json without churning its timestamp on quiet runs.
+
+    The warm-up runs every monitor cycle. Preserve the previous timestamp when
+    the service states are unchanged so cache-only commits remain quiet.
+    """
     try:
+        previous = {}
+        try:
+            with open(PROXY_HEALTH_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                previous = loaded
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+
+        same_services = previous.get("services") == health.get("services")
+        timestamp = previous.get("ts") if same_services else int(time.time())
+        payload = {"ts": timestamp, **health}
+        if same_services and payload == previous:
+            return
         with open(PROXY_HEALTH_FILE, "w", encoding="utf-8") as f:
-            json.dump({"ts": int(time.time()), **health}, f, indent=2)
+            json.dump(payload, f, indent=2)
     except Exception as e:
         logging.error(f"Error saving proxy health: {e}")
 

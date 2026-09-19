@@ -438,7 +438,9 @@ def load_posted() -> set:
 def save_posted(posted: set):
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(posted)[-MAX_CACHE_SIZE:], f, indent=2)
+            # Keep identical sets byte-identical so quiet runs do not create
+            # commits from process-dependent set iteration order.
+            json.dump(sorted(posted)[-MAX_CACHE_SIZE:], f, indent=2)
     except Exception as e:
         logging.error(f"Error saving cache: {e}")
 
