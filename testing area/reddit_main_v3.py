@@ -246,7 +246,7 @@ MININGTCUP_TOKEN = os.getenv("NITTER_RSS_TOKEN", "").strip()
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "").strip()
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
 # Reddit requires a descriptive User-Agent for OAuth API calls.
-REDDIT_API_USER_AGENT = "python:uesu.news-feed-embed:v3 (personal rss monitor)"
+REDDIT_API_USER_AGENT = "python:uesu.news-express:v3 (personal rss monitor)"
 
 CACHE_FILE = "posted_reddit.json"
 MAX_CACHE_SIZE = 500
@@ -254,6 +254,20 @@ MAX_CACHE_SIZE = 500
 # Wide window (48h) so posts approved from a subreddit's moderator queue a day
 # or more later are still caught (approval bumps the RSS "updated" stamp).
 MAX_AGE_SECONDS = 48 * 3600
+
+# ---------------------------------------------------------------------------
+# ■ PENDING-POST RECHECK CACHE (round 30, 2026-09-19)
+# Posts skipped by the removed/deleted/pending-approval gates (rounds 18/20)
+# or the Arctic media-wait gates (rounds 23/25) are tracked in
+# pending_reddit.json and re-verified at most once every
+# PENDING_RECHECK_SECONDS instead of EVERY run. Without this, every 5-minute
+# run re-runs the full live-check chain (proxy services + redlib + media
+# resolution) for each still-pending post — the dominant cost of quiet runs
+# (2.5-3.5 min) and the window in which overlapping runs could double-post.
+# ---------------------------------------------------------------------------
+PENDING_FILE = "pending_reddit.json"
+PENDING_RECHECK_SECONDS = int(os.getenv("PENDING_RECHECK_SECONDS", "1800"))  # 30 min
+PENDING_MAX_AGE_SECONDS = 48 * 3600  # matches the 48h posting window
 
 # ---------------------------------------------------------------------------
 # ■ RSS SOURCES (unchanged from V1/V2 — see round 8/9 notes)
@@ -326,7 +340,7 @@ DRY_RUN = os.getenv("DRY_RUN", "0").strip().lower() in ("1", "true", "yes", "on"
 DISCOHOOK_PREVIEW = _env_flag("DISCOHOOK_PREVIEW", "1")
 DISCOHOOK_SHARE_ENDPOINT = "https://discohook.app/api/v1/share"
 DISCOHOOK_SHARE_TTL = 7 * 24 * 3600  # 7 days (API max: 28)
-DISCOHOOK_USER_AGENT = "python:uesu.news-feed-embed:v3 (discohook share preview)"
+DISCOHOOK_USER_AGENT = "python:uesu.news-express:v3 (discohook share preview)"
 
 # ---------------------------------------------------------------------------
 # ■ PROXY MEDIA SERVICES (round 13) — see testing area/reddit_proxy.py
@@ -427,6 +441,49 @@ def save_posted(posted: set):
             json.dump(list(posted)[-MAX_CACHE_SIZE:], f, indent=2)
     except Exception as e:
         logging.error(f"Error saving cache: {e}")
+
+
+def load_pending() -> dict:
+    try:
+        if os.path.exists(PENDING_FILE):
+            with open(PENDING_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logging.error(f"Error reading pending cache: {e}")
+    return {}
+
+
+def save_pending(pending: dict) -> None:
+    # Prune entries older than PENDING_MAX_AGE_SECONDS (the 48h posting
+    # window has passed — collect() can no longer pick the post up anyway).
+    try:
+        now = time.time()
+        pruned = {k: v for k, v in pending.items()
+                  if isinstance(v, dict)
+                  and now - float(v.get("first_seen") or 0) <= PENDING_MAX_AGE_SECONDS}
+        with open(PENDING_FILE, "w", encoding="utf-8") as f:
+            json.dump(dict(sorted(pruned.items())), f, indent=2)
+    except Exception as e:
+        logging.error(f"Error saving pending cache: {e}")
+
+
+def mark_pending(pending: dict, key: str, reason: str, now: float) -> None:
+    entry = pending.get(key)
+    if isinstance(entry, dict):
+        entry["last_checked"] = now
+        entry["reason"] = reason
+    else:
+        pending[key] = {"first_seen": now, "last_checked": now, "reason": reason}
+
+
+def pending_due(pending: dict, key: str, now: float) -> bool:
+    """True when the pending post is due for a live re-check (never seen,
+    or PENDING_RECHECK_SECONDS have passed since the last check)."""
+    entry = pending.get(key)
+    if not isinstance(entry, dict):
+        return True
+    return now - float(entry.get("last_checked") or 0) >= PENDING_RECHECK_SECONDS
 
 
 def normalize_reddit_path(link: str) -> str | None:
@@ -2588,6 +2645,7 @@ async def main():
                      "token on .json (tested once per run); otherwise cards use native RSS data.")
 
     posted = load_posted()
+    pending = load_pending()
     is_first_run = len(posted) == 0
     now = time.time()
 
@@ -2686,6 +2744,7 @@ async def main():
         if total_found == 0:
             logging.info("No new Reddit posts to post.")
             save_posted(posted)
+            save_pending(pending)
             return
 
         logging.info(f"Found {total_found} new Reddit posts. Building V3 cards...")
@@ -2700,6 +2759,25 @@ async def main():
                 continue
 
             reddit_url = f"https://www.reddit.com{path}"
+
+            # ---- round 30 (2026-09-19): pending-post recheck throttle ----
+            # A post an earlier run skipped (removed/deleted, still pending
+            # approval, media not filled yet) is re-verified at most once
+            # every PENDING_RECHECK_SECONDS — not every 5-minute run. When it
+            # IS due, the full pipeline below runs unchanged, so a
+            # newly-approved / restored / media-complete post is caught and
+            # posted on its next due run. TEST POST + DRY RUN bypass this
+            # (manual tools must always exercise the full pipeline).
+            if (not TEST_POST_ID and not DRY_RUN
+                    and unique_key in pending
+                    and not pending_due(pending, unique_key, now)):
+                _pend = pending[unique_key]
+                _due_in = int(PENDING_RECHECK_SECONDS
+                              - (now - float(_pend.get("last_checked") or 0)))
+                logging.info(f"[{unique_key}] pending ({_pend.get('reason')}) — "
+                             f"skipping recheck, due again in ~{_due_in}s.")
+                continue
+
             if entry is not None:
                 base = entry_to_base_data(entry)
                 post_json = await fetch_post_json(session, extract_post_id(path) or "",
@@ -2777,6 +2855,7 @@ async def main():
                            or str(base.get("body") or ""))
                 _removed = removed_post_reason(_r_title, _r_body)
                 if _removed:
+                    mark_pending(pending, unique_key, _removed, now)
                     logging.info(f"[{unique_key}] post appears removed/deleted "
                                  f"({_removed}) — skipping, not cached (will post "
                                  f"once approved).")
@@ -2792,6 +2871,10 @@ async def main():
                 _live, _why = await verify_archive_post_live(session, path,
                                                              label=unique_key)
                 if not _live:
+                    mark_pending(pending, unique_key,
+                                 "removal_notice" if "removal notice" in _why
+                                 else "sources_down" if "all live sources are down" in _why
+                                 else "not_live", now)
                     logging.info(f"[{unique_key}] archive post not verified "
                                  f"live ({_why}) — skipping, not cached (will "
                                  f"post once approved/restored).")
@@ -2815,6 +2898,7 @@ async def main():
                         and isinstance(entry, _ArcticEntry)
                         and not data["media"]
                         and _arctic_media_hint(getattr(entry, "_arctic_post", None))):
+                    mark_pending(pending, unique_key, "media_wait", now)
                     logging.info(f"[{unique_key}] archive record says this post "
                                  f"has media (gallery/media_metadata) but no "
                                  f"source served any yet (Arctic fills those "
@@ -2829,6 +2913,7 @@ async def main():
                         and not any(m["kind"] == "video" for m in data["media"])):
                     _arctic_n = _arctic_media_count(getattr(entry, "_arctic_post", None))
                     if _arctic_n > len(data["media"]):
+                        mark_pending(pending, unique_key, "partial_gallery", now)
                         logging.info(f"[{unique_key}] archive record lists "
                                      f"{_arctic_n} gallery items but the sources "
                                      f"served only {len(data['media'])} this run — "
@@ -2854,6 +2939,7 @@ async def main():
                                         timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status in (200, 204):
                         posted.add(unique_key)
+                        pending.pop(unique_key, None)  # posted — no longer pending
                         kinds = ",".join(sorted({m["kind"] for m in data["media"]})) or "text"
                         mode = "full" if data["full_mode"] else "native"
                         logging.info(f"Reddit V3 Posted: {unique_key} (media={kinds} | {mode} | "
@@ -2892,6 +2978,7 @@ async def main():
         logging.info("DRY RUN finished: cache NOT saved, Discord NOT touched.")
     else:
         save_posted(posted)
+        save_pending(pending)
         logging.info("Reddit V3 Monitor execution finished.")
 
 

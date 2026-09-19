@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # 📋 Plain Embed V1 Edition — twitter_v1.py
 # ---------------------------------------------------------------------------
-# To use it: set the workflow's run line to:  python twitter_v1.py
+# To use it: set the workflow's run line to:  python "testing area/twitter_v1.py"
 # Note: buttons are outside the embed v1
 # ---------------------------------------------------------------------------
 import os

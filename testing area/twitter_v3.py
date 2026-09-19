@@ -262,7 +262,13 @@ def load_posted_urls() -> set:
 def save_posted_urls(posted_urls: set):
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(posted_urls)[-MAX_CACHE_SIZE:], f, indent=2)
+            # round 30 (2026-09-19): sorted() — the same set of ids now dumps
+            # byte-identical, so runs that post nothing commit NOTHING.
+            # (The set's order used to shuffle every run because Python
+            # randomizes str hashes per process.) All current tweet ids are
+            # 19 digits, so lexicographic sort == numeric sort, and the
+            # [-MAX_CACHE_SIZE:] trim keeps the NEWEST 500.
+            json.dump(sorted(posted_urls)[-MAX_CACHE_SIZE:], f, indent=2)
     except Exception as e:
         logging.error(f"Error saving cache: {e}")
 
