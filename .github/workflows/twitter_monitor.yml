@@ -1,5 +1,16 @@
 name: Twitter Feed Monitor
 
+concurrency:
+  # P0 DOUBLE-POST FIX (2026-09-19): same reason as the Reddit monitor —
+  # a trigger arriving mid-run QUEUES and starts later, checking out the
+  # NEWEST main (with the first run's fresh posted_tweets.json) so the
+  # dedup cache skips everything already posted.
+  # cancel-in-progress MUST stay false: a run can sit between "Discord
+  # posted" and "cache committed" — cancelling it there would lose the
+  # cache update and allow a re-post.
+  group: check-twitter-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   # ── GITHUB NATIVE SCHEDULE: DISABLED (2026-09-17) ────────────────────────
   # It raced with the cron-job.org workflow_dispatch triggers: both checked
@@ -65,11 +76,11 @@ jobs:
         #       run: python "testing area/twitter_v3.py"
         # • Check BOTH the Discord post(s) AND this workflow's log.
         # • Switch between engines by pointing the run line to:
-        #       run: python twitter_v1.py                              <- V1 (plain, no API key)
+        #       run: python "testing area/twitter_v1.py"               <- V1 (plain, no API key)
         #       run: python "testing area/twitter_v2_button_outside.py" <- V2 (card, buttons outside)
         #       run: python "testing area/twitter_v3.py"                <- V3 (card, buttons nested)
         # ───────────────────────────────────────────────────────────────────
-        run: python "testing area/twitter_v3.py"   # ← switch to twitter_v1.py / twitter_v2_button_outside.py here
+        run: python "testing area/twitter_v3.py"   # ← switch to testing area/twitter_v1.py / twitter_v2_button_outside.py here
 
       - name: Commit and push updated posted_tweets.json cache
         run: |

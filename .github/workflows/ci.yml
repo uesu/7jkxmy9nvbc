@@ -31,7 +31,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile every .py file (syntax errors fail here)
-        run: python -m compileall -q twitter_v1.py "testing area" tests
+        run: python -m compileall -q "testing area" tests
 
       - name: Offline smoke test (no network, no secrets needed)
         run: python tests/test_smoke.py

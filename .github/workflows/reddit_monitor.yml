@@ -1,5 +1,19 @@
 name: Reddit Feed Monitor
 
+concurrency:
+  # P0 DOUBLE-POST FIX (2026-09-19): only ONE run per branch at a time.
+  # A 2nd trigger while one is running QUEUES and starts later — it then
+  # checks out the NEWEST main (with the first run's fresh
+  # posted_reddit.json) and the dedup cache skips everything already
+  # posted. The 2026-09-19 double post (AnantaLeaks_1wkld9d /
+  # WutheringWavesLeaks_1wkldhu / AnantaLeaks_1wkle5u, runs #48 + #49)
+  # happened because two runs shared the same pre-post base commit.
+  # cancel-in-progress MUST stay false: a run can sit between
+  # "Discord posted" and "cache committed" — cancelling it there would
+  # lose the cache update and allow a re-post.
+  group: check-reddit-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   # ── GITHUB NATIVE SCHEDULE: DISABLED (2026-09-17) ────────────────────────
   # It raced with the cron-job.org workflow_dispatch triggers: both checked
@@ -74,6 +88,10 @@ jobs:
           # YOUTUBE_MEDIA_EMBED — '1' also tries to PLAY youtube links (seaof.glass);
           #                       default = thumbnail + spark button only
           # FEEDTOKEN_JSON_STAGGER — seconds to wait between feed-token .json attempts
+          # PENDING_RECHECK_SECONDS — seconds between live re-checks of skipped
+          #                       (removed/pending/media-waiting) posts; default
+          #                       1800 (30 min). Lower = newly-approved posts are
+          #                       caught sooner, higher = faster quiet runs.
           # PROXY_MEDIA: ${{ vars.PROXY_MEDIA }}
           # PROXY_WARMUP_POST: ${{ vars.PROXY_WARMUP_POST }}
           # YOUTUBE_LINK_MESSAGE: ${{ vars.YOUTUBE_LINK_MESSAGE }}
@@ -81,6 +99,7 @@ jobs:
           # REDDIT_OP_COMMENT: ${{ vars.REDDIT_OP_COMMENT }}
           # YOUTUBE_MEDIA_EMBED: ${{ vars.YOUTUBE_MEDIA_EMBED }}
           # FEEDTOKEN_JSON_STAGGER: ${{ vars.FEEDTOKEN_JSON_STAGGER }}
+          # PENDING_RECHECK_SECONDS: ${{ vars.PENDING_RECHECK_SECONDS }}
           WEBHOOK_REDDIT_ZENLESSZONEZEROLEAKS_: ${{ secrets.WEBHOOK_REDDIT_ZENLESSZONEZEROLEAKS_ }}
           WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS: ${{ secrets.WEBHOOK_REDDIT_GENSHIN_IMPACT_LEAKS }}
           WEBHOOK_REDDIT_HONKAISTARRAIL_LEAKS: ${{ secrets.WEBHOOK_REDDIT_HONKAISTARRAIL_LEAKS }}
@@ -106,9 +125,9 @@ jobs:
         # ───────────────────────────────────────────────────────────────────
         run: python "testing area/reddit_main_v3.py"   # ← V3 (proxy media + native fallback)
 
-      - name: Commit and push updated caches (posted_reddit.json + proxy_health.json)
+      - name: Commit and push updated caches (posted_reddit.json + proxy_health.json + pending_reddit.json)
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add -f posted_reddit.json proxy_health.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update posted_reddit.json + proxy_health.json caches" && git push)
+          git add -f posted_reddit.json proxy_health.json pending_reddit.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update posted_reddit.json + proxy_health.json + pending_reddit.json caches" && git push)
