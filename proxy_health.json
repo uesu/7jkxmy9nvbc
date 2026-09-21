@@ -1,5 +1,5 @@
 {
-  "ts": 1789835724,
+  "ts": 1789996532,
   "post": "HonkaiStarRail_leaks/1whbjbh",
   "services": {
     "redditez": {
@@ -11,8 +11,8 @@
       "detail": "1 media item(s)"
     },
     "embeddit": {
-      "ok": true,
-      "detail": "1 media item(s)"
+      "ok": false,
+      "detail": "no usable data"
     }
   }
 }
