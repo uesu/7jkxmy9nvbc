@@ -46,7 +46,7 @@
 #   • Everything from round 3 is kept: clickable hashtags/mentions, smart
 #     video sizing (probe real bytes; >256 MB → smaller formats[] rendition or
 #     thumbnail+watch link), /en translation, 🕐 timestamps, null-safe color.
-#   • ROUND 10 (2026-09-13): FULL X ARTICLE  — FxTwitter's API returns
+#   • ROUND 10 (2026-09-13): FULL X ARTICLE support — FxTwitter's API returns
 #     each article as clean JSON (tweet.article: title, cover image, draft.js
 #     text blocks, in-article images/GIFs — no x.com scraping, no login).
 #     Article tweets now post as: cover image -> **title** + full body text
