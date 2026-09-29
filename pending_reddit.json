@@ -230,7 +230,7 @@
   },
   "HonkaiStarRail_leaks_1wt02b9": {
     "first_seen": 1790665522.7887144,
-    "last_checked": 1790667325.4597352,
+    "last_checked": 1790672120.7368424,
     "reason": "media_wait"
   },
   "HonkaiStarRail_leaks_1wt2f6v": {
@@ -314,6 +314,22 @@
     "source": "arctic",
     "title": "\u300cHSR 4.7\u300dNihilux Eidolon page (via Dim)",
     "published_ts": 1790671381
+  },
+  "HonkaiStarRail_leaks_1wt4ug3": {
+    "first_seen": 1790672120.7368424,
+    "last_checked": 1790672120.7368424,
+    "reason": "removal_notice",
+    "source": "arctic",
+    "title": "\u300cHSR 4.7\u300dAeon\u2605Aha Eidolon page (via Dim)",
+    "published_ts": 1790671482
+  },
+  "HonkaiStarRail_leaks_1wt4wqg": {
+    "first_seen": 1790672120.7368424,
+    "last_checked": 1790672120.7368424,
+    "reason": "removal_notice",
+    "source": "arctic",
+    "title": "Nihillux edilon page by dim",
+    "published_ts": 1790671725
   },
   "WutheringWavesLeaks_1ws8vsc": {
     "first_seen": 1790583922.7257438,
