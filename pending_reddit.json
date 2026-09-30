@@ -188,7 +188,7 @@
   },
   "HonkaiStarRail_leaks_1wt02b9": {
     "first_seen": 1790665522.7887144,
-    "last_checked": 1790758843.7577815,
+    "last_checked": 1790760923.7399075,
     "reason": "media_wait"
   },
   "HonkaiStarRail_leaks_1wt2f6v": {
@@ -318,6 +318,14 @@
     "source": "arctic",
     "title": "<3",
     "published_ts": 1790738605
+  },
+  "HonkaiStarRail_leaks_1wu0fob": {
+    "first_seen": 1790760923.7399075,
+    "last_checked": 1790760923.7399075,
+    "reason": "removal_notice",
+    "source": "arctic",
+    "title": "Evanescia's trace is bugged with AHA via Seele Leak",
+    "published_ts": 1790760601
   },
   "WutheringWavesLeaks_1wse9vn": {
     "first_seen": 1790601626.83616,
