@@ -15,22 +15,6 @@
     "title": "Speculative Map of Teyvat",
     "published_ts": 1790716685
   },
-  "HonkaiStarRail_leaks_1wt3vin": {
-    "first_seen": 1790668224.1053772,
-    "last_checked": 1790668224.1053772,
-    "reason": "removal_notice",
-    "source": "arctic",
-    "title": "Aha gameplay, via Dimbreath",
-    "published_ts": 1790667739
-  },
-  "HonkaiStarRail_leaks_1wt414c": {
-    "first_seen": 1790668838.5802827,
-    "last_checked": 1790668838.5802827,
-    "reason": "removal_notice",
-    "source": "arctic",
-    "title": "[HSR - 4.7] Aeon \u2605 Aha Animations via Dim",
-    "published_ts": 1790668341
-  },
   "HonkaiStarRail_leaks_1wt489z": {
     "first_seen": 1790671727.6500993,
     "last_checked": 1790671727.6500993,
@@ -150,6 +134,14 @@
     "source": "arctic",
     "title": "Aeon \u2605 Aha's Ultimate is Cinema",
     "published_ts": 1790778678
+  },
+  "HonkaiStarRail_leaks_1wut2cn": {
+    "first_seen": 1790842246.3865726,
+    "last_checked": 1790842246.3865726,
+    "reason": "duplicate_media",
+    "source": "arctic",
+    "title": "Aeon Aha E1S0 (Mushy) / EMC E6S5 (Mushy) / Yaoguang E0S0 (Mushy) / Pearl E0S0 (Mushy) -- 4.7v1 AA Knight 2 -- Graphia Corruption 4 0 Cycle",
+    "published_ts": 1790839577
   },
   "WutheringWavesLeaks_1wtb7uc": {
     "first_seen": 1790691922.1803753,
