@@ -23,6 +23,14 @@
     "title": "All we need is 7.2 characters\u2019 birthday",
     "published_ts": 1790909594
   },
+  "Genshin_Impact_Leaks_1wvk8dh": {
+    "first_seen": 1790914232.9553056,
+    "last_checked": 1790914232.9553056,
+    "reason": "nsfw_unknown",
+    "source": "rss",
+    "title": "7x Possible future characters via Shirai_Kurokochan",
+    "published_ts": 1790914222
+  },
   "HonkaiStarRail_leaks_1wu0fob": {
     "first_seen": 1790760923.7399075,
     "last_checked": 1790760923.7399075,
@@ -74,6 +82,11 @@
   "HonkaiStarRail_leaks_1wviga0": {
     "first_seen": 1790909124.3011475,
     "last_checked": 1790913027.0558815,
+    "reason": "media_wait"
+  },
+  "HonkaiStarRail_leaks_1wvk24v": {
+    "first_seen": 1790914232.9553056,
+    "last_checked": 1790914232.9553056,
     "reason": "media_wait"
   },
   "WutheringWavesLeaks_1wtz7ie": {
