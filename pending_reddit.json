@@ -134,8 +134,8 @@
   },
   "HonkaiNexusAnimaLeaks_1wx9ejk": {
     "first_seen": 1791098301.3570693,
-    "last_checked": 1791098663.3668869,
-    "reason": "pending approval",
+    "last_checked": 1791098834.9639316,
+    "reason": "media_wait",
     "source": "arctic",
     "title": "character props and weapons",
     "published_ts": 1791098122
@@ -195,13 +195,5 @@
     "source": "arctic",
     "title": "Phoenix team",
     "published_ts": 1791005001
-  },
-  "Zenlesszonezeroleaks__1wx9cra": {
-    "first_seen": 1791098125.4177997,
-    "last_checked": 1791098663.3668869,
-    "reason": "pending approval",
-    "source": "rss",
-    "title": "HSR Collab Characters via Seele",
-    "published_ts": 1791097930
   }
 }
