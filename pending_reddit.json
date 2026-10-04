@@ -71,6 +71,14 @@
     "title": "[7.2v2] Main event pics via nannano",
     "published_ts": 1791083489
   },
+  "Genshin_Impact_Leaks_1wx651q": {
+    "first_seen": 1791086600.9367335,
+    "last_checked": 1791086600.9367335,
+    "reason": "pending approval",
+    "source": "rss",
+    "title": "Ruler of Death \u201cRonova\u201d",
+    "published_ts": 1791086446
+  },
   "HonkaiNexusAnimaLeaks_1wwjl8d": {
     "first_seen": 1791022098.9045324,
     "last_checked": 1791022098.9045324,
@@ -97,7 +105,7 @@
   },
   "HonkaiNexusAnimaLeaks_1wwnu46": {
     "first_seen": 1791037729.3511693,
-    "last_checked": 1791084794.8977404,
+    "last_checked": 1791086600.9367335,
     "reason": "media_wait"
   },
   "HonkaiStarRail_leaks_1wwjep4": {
@@ -139,5 +147,13 @@
     "source": "arctic",
     "title": "Phoenix team",
     "published_ts": 1791005001
+  },
+  "Zenlesszonezeroleaks__1wx653t": {
+    "first_seen": 1791086600.9367335,
+    "last_checked": 1791086600.9367335,
+    "reason": "pending approval",
+    "source": "rss",
+    "title": "Happy Birthday Lycaon | Vigil at Sunset",
+    "published_ts": 1791086450
   }
 }
