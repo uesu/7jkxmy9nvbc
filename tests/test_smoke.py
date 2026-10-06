@@ -2343,13 +2343,20 @@ for _r39_rel, _r39_expected in (
     check(f"r39 source fleet: {_r39_rel} has the reviewed Reddit RSS order",
           _literal_list_constant(_r39_rel, "REDDIT_RSS_INSTANCES") == _r39_expected)
 
+_r39_runtime_pin = None
 for _r39_wf in (".github/workflows/ci.yml", ".github/workflows/reddit_monitor.yml",
                 ".github/workflows/twitter_monitor.yml"):
     with open(os.path.join(ROOT, _r39_wf), encoding="utf-8") as _fh:
         _r39_source = _fh.read()
-    check(f"r39 runtime: {_r39_wf} pins CPython 3.14.7 exactly once",
-          _r39_source.count("python-version: '3.14.7'") == 1
-          and "python-version: '3.11'" not in _r39_source)
+    _r39_pins = re.findall(r"^\s*python-version:\s*'((?:3)\.\d+\.\d+)'\s*$",
+                            _r39_source, flags=re.MULTILINE)
+    if _r39_runtime_pin is None and len(_r39_pins) == 1:
+        _r39_runtime_pin = _r39_pins[0]
+    check(f"r39 runtime: {_r39_wf} has one exact CPython pin matching CI",
+          len(_r39_pins) == 1
+          and _r39_pins[0] == _r39_runtime_pin
+          and "python-version: '3.11'" not in _r39_source,
+          str(_r39_pins))
 
 for _r39_wf in (".github/workflows/reddit_monitor.yml", ".github/workflows/twitter_monitor.yml"):
     with open(os.path.join(ROOT, _r39_wf), encoding="utf-8") as _fh:
