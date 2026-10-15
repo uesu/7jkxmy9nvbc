@@ -765,10 +765,21 @@ def cmd_classify_checks(args: argparse.Namespace) -> int:
     return 0 if result.get("state") == "ready" else 1
 
 
-def _api_pages(url: str, token: str) -> tuple[int, list[Any]]:
+def _api_pages(url: str, token: str, max_pages: int = 10) -> tuple[int, list[Any]]:
+    """Follow GitHub pagination, failing closed at an explicit bound.
+
+    Truncated evidence is worse than no evidence: a merge decision taken on the
+    first N files or reviews can be wrong in exactly the direction that matters.
+    Exceeding the bound returns a non-200 status so callers refuse to decide
+    rather than proceeding on a partial picture.
+    """
     items: list[Any] = []
     next_url: str | None = url
+    pages = 0
     while next_url:
+        pages += 1
+        if pages > max_pages:
+            return 508, items
         status, payload = _github_json(next_url, token)
         if status != 200:
             return status, payload if isinstance(payload, list) else [payload]
@@ -841,7 +852,9 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         token,
     )
     if status != 200:
-        reviews = []
+        # An unreadable review list is not the same as an unreviewed PR. Falling
+        # back to [] here would discard a CHANGES_REQUESTED and merge over it.
+        return Decision("fail", f"reviews-api:{status}")
     status, statuses = _github_json(
         f"https://api.github.com/repos/{owner}/{name}/commits/{head_sha}/status",
         token,

@@ -332,5 +332,91 @@ class CiRegistryTests(unittest.TestCase):
         self.assertEqual(ci_mod.final_gate({"application": 0, "maintenance": 0}), 0)
 
 
+class LiveAdapterEvidenceTests(unittest.TestCase):
+    """Drive build_live_snapshot itself, not just decide_merge on ideal JSON.
+
+    A helper-only fixture cannot show that the production adapter fails closed
+    when a source of evidence goes missing, which is the failure mode that
+    actually merges something it should not.
+    """
+
+    EVENT = {
+        "repository": {"full_name": "acme/app", "default_branch": "main"},
+        "pull_request": {"number": 12, "head": {"sha": SHA}},
+    }
+
+    def _run(self, responder):
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            return maintenance.build_live_snapshot(self.EVENT, "token", {})
+        finally:
+            maintenance._github_json = original
+
+    @staticmethod
+    def _ok(url, *args, **kwargs):
+        if "/pulls/12/files" in url:
+            return 200, []
+        if "/pulls/12/reviews" in url:
+            return 200, []
+        if "/check-runs" in url:
+            return 200, {"check_runs": [], "total_count": 0}
+        if url.endswith("/status"):
+            return 200, {"state": "success", "statuses": []}
+        if url.endswith("/pulls/12"):
+            return 200, _pr()
+        return 404, {}
+
+    def test_baseline_snapshot_is_built(self):
+        result = self._run(self._ok)
+        self.assertIsInstance(result, dict, f"expected a snapshot, got {result!r}")
+
+    def test_unreadable_reviews_fail_closed_instead_of_merging(self):
+        def responder(url, *a, **k):
+            if "/pulls/12/reviews" in url:
+                return 500, {}
+            return self._ok(url)
+
+        result = self._run(responder)
+        # Regression: this used to fall back to reviews = [], which reads as
+        # "nobody objected" and would merge straight over a CHANGES_REQUESTED.
+        self.assertNotIsInstance(result, dict)
+        self.assertEqual(result.action, "fail")
+        self.assertIn("reviews-api", result.reason)
+
+    def test_api_pages_refuses_to_walk_past_its_bound(self):
+        # Direct assertion on the bound itself. Without it the walk above does
+        # not merely fail - it never terminates, so this is the crisp check.
+        calls = []
+
+        def responder(url, *args, **kwargs):
+            calls.append(url)
+            return 200, [{"i": len(calls)} for _ in range(100)]
+
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            status, _items = maintenance._api_pages(
+                "https://api.example.test/x?per_page=100&page=1", "token", max_pages=3
+            )
+        finally:
+            maintenance._github_json = original
+        self.assertEqual(status, 508)
+        self.assertEqual(len(calls), 3)
+
+    def test_pagination_bound_fails_closed(self):
+        def responder(url, *a, **k):
+            if "/pulls/12/files" in url:
+                return 200, [{"filename": f"f{i}.txt"} for i in range(100)]
+            return self._ok(url)
+
+        result = self._run(responder)
+        # Regression: _api_pages had no upper bound, so an endless full page
+        # either spun forever or was silently truncated to the first 100 files.
+        self.assertNotIsInstance(result, dict)
+        self.assertEqual(result.action, "fail")
+        self.assertIn("files-api", result.reason)
+
+
 if __name__ == "__main__":
     unittest.main()
