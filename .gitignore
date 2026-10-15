@@ -25,9 +25,9 @@ __pycache__/
 # the isolated compiler/tool virtualenvs the lock jobs build).
 /.compiler/
 /.tools/
-run-report*.json
-persistence*.json
-compiler-requirements*.txt
+/run-report*.json
+/persistence*.json
+/compiler-requirements*.txt
 
 # Ruff cache for the pinned lint gate (the tool version itself is pinned in
 # requirements-dev.txt; only its cache is generated).

@@ -156,13 +156,48 @@ def check_test_registration(profile: dict) -> tuple[bool, str]:
     }
     missing = [path for path in found if os.path.basename(path) not in registered]
     stale = sorted(registered - {os.path.basename(p) for p in found})
-    ok = not missing and not stale
+    hidden = _ignored_under_tests()
+    ok = not missing and not stale and not hidden
     detail = f"{len(found)} test file(s), {len(registered)} registered"
     if missing:
         detail += "; NOT REGISTERED: " + ", ".join(missing)
     if stale:
         detail += "; registered but absent: " + ", ".join(stale)
+    if hidden:
+        detail += "; IGNORED BY .gitignore (present locally, absent from a fresh checkout): "
+        detail += ", ".join(hidden)
     return ok, detail
+
+
+def _ignored_under_tests() -> list[str]:
+    """Test inputs that .gitignore would hide from a fresh checkout.
+
+    A scratch pattern written for a generated root-level artifact can match a
+    committed fixture by basename — `persistence*.json` did exactly that, so
+    three fixtures existed locally and were missing on every runner. The suite
+    then failed at import with nothing pointing at .gitignore. Asking git which
+    paths it would skip is the only check that catches this before it ships.
+    """
+    tests_dir = os.path.join(REPO_ROOT, "tests")
+    if not os.path.isdir(tests_dir):
+        return []
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--ignored=matching", "--", "tests"],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return []
+    hidden = []
+    for line in proc.stdout.splitlines():
+        if not line.startswith("!!"):
+            continue
+        path = line[2:].strip().strip('"').rstrip("/")
+        if "__pycache__" in path:
+            continue
+        if path.endswith("/"):
+            continue
+        hidden.append(path)
+    return sorted(hidden)
 
 
 def check_application(profile: dict) -> tuple[bool, str]:
