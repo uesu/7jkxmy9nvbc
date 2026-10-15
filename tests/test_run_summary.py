@@ -245,8 +245,58 @@ for _engine in ("twitter_v3", "reddit_main_v3"):
           'incr("media.video")' in _src and 'incr("media.image")' in _src)
     check(f"{_engine} flushes the report when the run ends",
           "_flush_run_report(report" in _src)
-    check(f"{_engine} can never let telemetry break the application",
-          "telemetry" in _src and "except Exception" in _src)
+    check(f"{_engine} records the run outcome even when a post failed",
+          "outcomes.held" in _src)
+
+# Behavioural, not textual: a mutator that raises would propagate out of the
+# posting loop — and in the Reddit engine out of an `except` handler — and skip
+# save_posted(), turning one bad counter into a re-post storm. So drive the
+# mutators with deliberately corrupted internal state and require that none of
+# them raises, while the healthy path still records real numbers.
+sys.path.insert(0, os.path.join(ROOT, "testing area"))
+import run_report as _rr  # noqa: E402
+
+_corrupt = (
+    ("incr through a non-dict parent",
+     lambda rep: (rep.set("targets", "not-a-dict"), rep.incr("targets.attempted"))),
+    ("note_target with a clobbered subtree",
+     lambda rep: (rep._data.__setitem__("targets", None),
+                  rep.note_target("sub", configured=True))),
+    ("note_reason with clobbered reasons",
+     lambda rep: (rep._data["outcomes"].__setitem__("reasons", None),
+                  rep.note_reason("posted.", "discord-ok"))),
+    ("note_fallback with clobbered media",
+     lambda rep: (rep._data.__setitem__("media", None),
+                  rep.note_fallback("embedez-mp4"))),
+    ("set with a non-string path",
+     lambda rep: rep.set(None, 1)),
+)
+for _label, _action in _corrupt:
+    try:
+        _action(_rr.RunReport(None))
+        check(f"mutator is total: {_label}", True)
+    except Exception as _exc:  # noqa: BLE001 - the assertion IS the exception
+        check(f"mutator is total: {_label} (raised {type(_exc).__name__})", False)
+
+_healthy = _rr.RunReport(None)
+for _t in ("a", "b", "a"):
+    _healthy.note_target(_t, configured=True)
+_healthy.note_request(3)
+_healthy.incr("outcomes.posted")
+_healthy.note_reason("posted.", "discord-ok")
+_healthy.incr("media.video")
+_healthy.note_fallback("embedez-mp4")
+_healthy.note_host("https://host.example", selected=True)
+_healthy.mark("completed")
+_hp = _healthy.payload()
+check("totality does not silently discard healthy counters",
+      _hp["targets"]["attempted"] == 2 and _hp["targets"]["configured"] == 3
+      and _hp["requests"]["total"] == 3 and _hp["outcomes"]["posted"] == 1
+      and _hp["outcomes"]["reasons"] == {"posted.discord-ok": 1}
+      and _hp["media"]["video"] == 1
+      and _hp["media"]["fallback_reasons"] == ["embedez-mp4"]
+      and _hp["hosts"]["selected"] == ["https://host.example"]
+      and _hp["result"] == "completed")
 
 # The renderer must treat a report from either engine identically, so the
 # workflow never has to know which monitor produced it.

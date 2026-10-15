@@ -18,6 +18,7 @@ Hard rules, all enforced here rather than in the engines:
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
@@ -33,6 +34,30 @@ MAX_SAMPLES = 24
 _KNOWN_REASON_PREFIXES = (
     "posted.", "edited.", "skipped.", "held.", "feed.", "host.", "media.", "setup.",
 )
+
+
+def _total(method):
+    """Make a mutator total: it records or does nothing, and never raises.
+
+    This is the module's contract ("every writer swallows its own errors"),
+    enforced rather than documented. It matters structurally, not just
+    aesthetically: the engines call these from inside the posting loop, and in
+    the Reddit engine from inside an ``except`` handler too. A mutator that
+    raised there would propagate out of ``main()`` and skip ``save_posted()``,
+    so one malformed counter would turn into a re-post storm on the next run —
+    the exact failure mode the dedup cache exists to prevent.
+
+    Losing a counter is always correct; losing the cache never is.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except Exception:  # noqa: BLE001 - telemetry must never break a run
+            return None
+
+    return wrapper
 
 
 def _now() -> float:
@@ -104,6 +129,7 @@ class RunReport:
 
     # ---- mutation --------------------------------------------------------
 
+    @_total
     def set(self, dotted: str, value: Any) -> None:
         node = self._data
         parts = dotted.split(".")
@@ -111,6 +137,7 @@ class RunReport:
             node = node.setdefault(part, {})
         node[parts[-1]] = value
 
+    @_total
     def incr(self, dotted: str, amount: int = 1) -> None:
         node = self._data
         parts = dotted.split(".")
@@ -119,6 +146,7 @@ class RunReport:
         current = node.get(parts[-1])
         node[parts[-1]] = (current or 0) + amount
 
+    @_total
     def note_target(self, name: str, *, configured: bool = False, usable: bool = False) -> None:
         """Count unique targets once; repeated attempts do not create new ones."""
         seen = self._data["_seen_targets"]
@@ -135,9 +163,11 @@ class RunReport:
                 self._data["_usable"].append(name)
                 self.incr("targets.usable")
 
+    @_total
     def note_request(self, count: int = 1) -> None:
         self.incr("requests.total", count)
 
+    @_total
     def note_host(self, name: str, *, selected: bool = False) -> None:
         if name not in self._data["_seen_hosts_attempted"]:
             self._data["_seen_hosts_attempted"].append(name)
@@ -146,11 +176,13 @@ class RunReport:
             self._data["_seen_hosts_selected"].append(name)
             self._data["hosts"]["selected"].append(name)
 
+    @_total
     def note_fallback(self, reason: str) -> None:
         if reason not in self._data["_seen_fallbacks"]:
             self._data["_seen_fallbacks"].append(reason)
             self._data["media"]["fallback_reasons"].append(reason[:MAX_SAMPLES * 2])
 
+    @_total
     def note_reason(self, bucket: str, name: str) -> None:
         reasons = self._data["outcomes"]["reasons"]
         if bucket not in _KNOWN_REASON_PREFIXES:
@@ -160,14 +192,17 @@ class RunReport:
             key = f"{bucket}other"
         reasons[key] = reasons.get(key, 0) + 1
 
+    @_total
     def warn(self, message: str) -> None:
         if len(self._data["warnings"]) < MAX_SAMPLES:
             self._data["warnings"].append(str(message)[:240])
 
+    @_total
     def error(self, message: str) -> None:
         if len(self._data["errors"]) < MAX_SAMPLES:
             self._data["errors"].append(str(message)[:240])
 
+    @_total
     def mark(self, result: str) -> None:
         self._data["result"] = result
 
