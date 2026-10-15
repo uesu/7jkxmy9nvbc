@@ -40,6 +40,28 @@ def check(name: str, condition: bool) -> None:
             print(f"::error title={os.path.basename(__file__)}::{name}")
 
 
+def _annotate_crash(exc_type, exc, tb):
+    """Report an uncaught exception as an annotation, then print it normally.
+
+    A crash produces no check() failure, so without this the only hosted signal
+    is "Process completed with exit code 1" and the traceback sits in a log
+    blob that may not be retrievable. The real cause has to survive the run.
+    """
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        frame = tb
+        while frame is not None and frame.tb_next is not None:
+            frame = frame.tb_next
+        where = ""
+        if frame is not None:
+            where = f" at {os.path.basename(frame.tb_frame.f_code.co_filename)}:{frame.tb_lineno}"
+        print(f"::error title={os.path.basename(__file__)} crashed::"
+              f"{exc_type.__name__}: {exc}{where}")
+    sys.__excepthook__(exc_type, exc, tb)
+
+
+sys.excepthook = _annotate_crash
+
+
 def read(*parts: str) -> str:
     with open(os.path.join(ROOT, *parts), encoding="utf-8") as handle:
         return handle.read()
