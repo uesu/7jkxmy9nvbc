@@ -416,7 +416,16 @@ def check_production_layout(profile: dict) -> tuple[bool, str]:
 
         code = _run([_python(), os.path.join(".github", "scripts", "ci.py"),
                      "--profile", "production", "--skip", "production-layout"], cwd=tmp)
-        return code == 0, "production profile passed with no README/AGENTS/docs present"
+        # Report the outcome that actually happened: printing the success string on
+        # failure would send a reader looking for a doc problem that is not
+        # there, when the real cause is a check that failed without any docs.
+        if code == 0:
+            return True, "production profile passed with no README/AGENTS/docs present"
+        return False, (
+            f"the production profile FAILED (exit {code}) inside a copy of the tree "
+            "with every optional development document removed — some check depends "
+            "on a doc this repository does not ship"
+        )
 
 
 CHECKS: dict[str, tuple[str, object]] = {
