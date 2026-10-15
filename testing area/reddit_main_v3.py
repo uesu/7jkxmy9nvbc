@@ -241,6 +241,31 @@ except Exception:
     reddit_signals = importlib.util.module_from_spec(_signals_spec)
     _signals_spec.loader.exec_module(reddit_signals)
 
+try:
+    from run_report import RunReport
+except Exception:
+    RunReport = None  # type: ignore
+
+_run_report = None
+
+
+def _report_outcome(kind: str, reason: str | None = None) -> None:
+    if _run_report is not None:
+        _run_report.outcome(kind, reason)
+
+
+def _report_feed(entries: int = 0, *, usable: bool = True, challenge: bool = False) -> None:
+    if _run_report is not None:
+        _run_report.feed_parsed(entries, usable=usable, challenge=challenge)
+
+
+def _report_target(name: str, *, usable: bool = False) -> None:
+    if _run_report is None or not name:
+        return
+    _run_report.target_attempted(name)
+    if usable:
+        _run_report.target_usable(name)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 load_dotenv()
 
@@ -853,61 +878,7 @@ except Exception as _proxy_import_error:
     reddit_proxy = None
     logging.warning(f"reddit_proxy module unavailable — native media only: {_proxy_import_error}")
 
-# Structured run report (2026-10-15 maintenance round). Soft import: without
-# the module the monitor behaves exactly as before and the workflow footer
-# reports the summary as unavailable instead of inventing counters from
-# formatted log lines. Recording telemetry must never change a posting
-# decision, resend a card, or mask the original application failure.
-try:
-    import run_report as _run_report
-except Exception as _report_import_error:
-    _run_report = None
-    logging.warning(f"run_report module unavailable — no structured run report "
-                    f"this run: {_report_import_error}")
-
 _proxy_health = None   # per-run warm-up result (set in main(), read in resolve_post_media)
-
-
-def _flush_run_report(report, result: str) -> None:
-    """Write the run report. Never raises, never changes the run outcome.
-
-    Telemetry failure must not resend a card or mask the original application
-    failure, so a failed write only logs a warning and the workflow footer
-    reports the summary as *unavailable* — which is truthful, unlike a fake
-    zero-activity report.
-    """
-    if report is None:
-        return
-    try:
-        report.set("durations.monitor", report.elapsed())
-        report.mark(result)
-        if not report.write():
-            logging.warning("run report could not be written — the summary will "
-                            "report it as unavailable.")
-    except Exception as exc:  # noqa: BLE001 - telemetry must never break a run
-        logging.warning(f"run report could not be written ({exc}) — the summary "
-                        f"will report it as unavailable.")
-
-
-def _media_satisfies(result, need_video: bool = False) -> bool:
-    """Does a proxy result actually answer the request that was made?
-
-    A non-empty media list satisfies an ordinary request. When a VIDEO was
-    asked for, only an actual motion-video item does: a poster, an
-    ``external-preview`` thumbnail or an audio-with-cover rendering is not
-    video evidence and must not hide a valid equivalent route (2026-10-15,
-    incident AnantaLeaks_1x6h1mf).
-    """
-    if not (isinstance(result, dict) and result.get("media")):
-        return False
-    if not need_video:
-        return True
-    return any(
-        isinstance(item, dict)
-        and item.get("kind") == "video"
-        and not item.get("audio_cover_only")
-        for item in result["media"]
-    )
 
 
 async def fetch_proxy_post_memo(session, path: str, label: str = "", health=None, need_video: bool = False):
@@ -928,31 +899,47 @@ async def fetch_proxy_post_memo(session, path: str, label: str = "", health=None
     # post as "/r/u_<name>/comments/<id>/", and the proxy services disagree
     # about which route they serve. Only a profile post HAS an alias, so an
     # ordinary subreddit post never makes this second call.
-    #
-    # 2026-10-15 (incident AnantaLeaks_1x6h1mf): a non-empty media list is NOT
-    # sufficient when a video was asked for. A poster/thumbnail answer on the
-    # /user/ route used to stop the equivalent /r/u_.../ alias attempt, so a
-    # valid video on the alias was never reached. `need_video` now means
-    # "motion video", end to end.
-    if not _media_satisfies(result, need_video):
+    # A nonempty image list is not a video result: retry aliases when the
+    # caller asked for motion video and the first route only returned stills.
+    if not _proxy_result_usable(result, need_video):
+        best = result
         for alias in _path_aliases(path)[1:]:
             alt = await reddit_proxy.fetch_proxy_post(session, alias, label=label,
                                                       health=health,
                                                       need_video=need_video)
-            if _media_satisfies(alt, need_video):
-                if isinstance(result, dict) and result.get("media"):
-                    # Keep the poster/text fallback available to the caller
-                    # while the alias result wins.
-                    alt = dict(alt, fallback_media=result.get("media"))
+            if _proxy_result_usable(alt, need_video):
                 logging.info(f"[{label or 'proxy'}] profile post resolved via "
-                             f"its subreddit alias {alias}"
-                             + (" (video found on the alias)"
-                                if need_video else ""))
+                             f"its subreddit alias {alias}")
                 result = alt
                 break
+            if isinstance(alt, dict) and alt.get("media") and not (
+                    isinstance(best, dict) and best.get("media")):
+                best = alt
+        else:
+            if isinstance(best, dict) and best.get("media"):
+                result = best
     if use_cache and result:
         _proxy_post_cache[key] = result
     return result
+
+
+def _proxy_result_has_motion_video(result) -> bool:
+    if not isinstance(result, dict):
+        return False
+    for item in result.get("media") or []:
+        if isinstance(item, dict) and item.get("kind") == "video":
+            url = str(item.get("url") or "")
+            if "/render/audio" not in url.lower():
+                return True
+    return False
+
+
+def _proxy_result_usable(result, need_video: bool) -> bool:
+    if not (isinstance(result, dict) and result.get("media")):
+        return False
+    if need_video:
+        return _proxy_result_has_motion_video(result)
+    return True
 
 # Native reddit video ladder: v.redd.it DASH_<q>.mp4 files are self-contained
 # mp4s (h264 + AAC). 404s answer instantly, so the ladder is cheap.
@@ -1351,184 +1338,205 @@ def extract_post_id(path: str) -> str | None:
 # originals too — r/AnantaLeaks 1wuv547 was one, and before this its
 # original (and therefore its video) was never found.
 CROSSPOST_PERMALINK_RE = re.compile(
-    r"/(?:r/[^/\s?<>]+|u(?:ser)?/[^/\s?<>]+)/comments/[a-zA-Z0-9]+/")
-
-# Crosspost-original identity (2026-10-15 incident AnantaLeaks_1x6h1mf):
-# a post's identity is its base36 post ID, NOT the string of the route that
-# happens to name it. '/user/aphotide/comments/1x6h1a5/phone_stealing/',
-# '/u/aphotide/comments/1x6h1a5/x/' and '/r/u_aphotide/comments/1x6h1a5/' are
-# the SAME post, and a child's own permalink with a different slug must never
-# be mistaken for its parent.
-POST_ID_RE = re.compile(r"^[a-zA-Z0-9]{4,12}$")
-REDDIT_COMMENT_ID_RE = re.compile(r"/comments/([a-zA-Z0-9]{4,12})(?:/|$|\?)")
-REDDIT_PERMITTED_HOSTS = frozenset({
-    "reddit.com", "www.reddit.com", "old.reddit.com", "new.reddit.com",
-    "np.reddit.com", "i.reddit.com", "amp.reddit.com", "gateway.reddit.com",
+    r"/(?:r/(?:u_)?[^/\s?<>]+|u(?:ser)?/[^/\s?<>]+)/comments/[a-zA-Z0-9]+/?",
+    re.I,
+)
+REDDIT_HOSTS = frozenset({
+    "reddit.com", "www.reddit.com", "old.reddit.com", "np.reddit.com",
+    "new.reddit.com", "m.reddit.com",
 })
-REDDIT_LINK_RE = re.compile(
-    r"(?i)https?://([a-z0-9][a-z0-9.\-]*)?(/(?:r|u|user)/[^\s\"'<>)\]]+)")
-# An explicitly identified parent, without the literal English word
-# "crosspost": the mirror's own parent marker in a matched-post context.
-PARENT_MARKER_RE = re.compile(r"(?i)\bcrosspost\w*\b|\boriginal\s*post(?!(?-i:[a-z]))")
-ANY_URL_RE = re.compile(r"(?i)https?://[^\s\"'<>)\]]+")
+_LABELED_ORIGINAL_RE = re.compile(
+    r"(?is)(?:\[original(?:\s+|&nbsp;)*post\]\((https?://[^)\s]+|/[^)\s]+)\)"
+    r"|<a\b[^>]*href=[\"'](https?://[^\"'\s]+|/[^\"'\s]+)[\"'][^>]*>\s*"
+    r"original(?:\s+|&nbsp;)*post\s*</a>"
+    r"|original(?:\s+|&nbsp;)*post[^\]\[\n]{0,80}"
+    r"(https?://(?:www\.|old\.|np\.|new\.|m\.)?reddit\.com/"
+    r"(?:r/(?:u_)?[^/\s?<>]+|u(?:ser)?/[^/\s?<>]+)/comments/[a-zA-Z0-9]+/?)"
+    r"|(https?://(?:www\.|old\.|np\.|new\.|m\.)?reddit\.com/"
+    r"(?:r/(?:u_)?[^/\s?<>]+|u(?:ser)?/[^/\s?<>]+)/comments/[a-zA-Z0-9]+/?)"
+    r"[^\]\[\n]{0,80}original(?:\s+|&nbsp;)*post)",
+)
 
 
-def canonical_post_id(value: str | None) -> str | None:
-    """The base36 post identity of a permalink, ID or bare ID string.
+def canonical_post_id(link: str | None) -> str | None:
+    path = normalize_reddit_path(link or "") or (link or "")
+    return extract_post_id(path)
 
-    Slug text, query strings, trailing slashes, profile aliases and Reddit's
-    ``t3_`` fullname prefix are all irrelevant to identity, so they are
-    discarded here and never compared.
-    """
-    if not value:
+
+def is_same_reddit_post(left: str | None, right: str | None) -> bool:
+    a, b = canonical_post_id(left), canonical_post_id(right)
+    return bool(a and b and a.lower() == b.lower())
+
+
+def _permalink_host_allowed(text: str, match_start: int) -> bool:
+    prefix = text[max(0, match_start - 96):match_start]
+    host_m = re.search(r"https?://([^/\s]+)$", prefix)
+    if not host_m:
+        return True
+    host = host_m.group(1).split("@")[-1].split(":")[0].lower()
+    return host in REDDIT_HOSTS
+
+
+def _normalized_foreign_safe_path(raw: str, text: str, start: int) -> str | None:
+    if not _permalink_host_allowed(text, start):
         return None
-    text = str(value).strip()
-    match = REDDIT_COMMENT_ID_RE.search(text)
-    if match:
-        return match.group(1)
-    # Reddit fullnames ("t3_1x6h1a5") name the same post as the bare ID.
-    fullname = re.match(r"^(?:t[12368])_([a-zA-Z0-9]{4,12})$", text)
-    if fullname:
-        return fullname.group(1)
-    match = re.fullmatch(r"[a-zA-Z0-9]{4,12}", text)
-    return match.group(0) if match else None
+    blob = raw.strip()
+    if blob.startswith("http"):
+        parsed = urlparse(blob)
+        host = (parsed.netloc or "").split("@")[-1].split(":")[0].lower()
+        if host not in REDDIT_HOSTS:
+            return None
+        blob = parsed.path or ""
+    if not blob.startswith("/"):
+        blob = "/" + blob
+    clipped = CROSSPOST_PERMALINK_RE.search(blob)
+    if clipped:
+        blob = clipped.group(0)
+        if not blob.startswith("/"):
+            blob = "/" + blob
+    path = normalize_reddit_path(blob)
+    if not path:
+        return None
+    pid = extract_post_id(path)
+    if not pid or not re.fullmatch(r"[a-zA-Z0-9]+", pid):
+        return None
+    return path
 
 
-def is_same_post(a: str | None, b: str | None) -> bool:
-    """True when two permalinks/IDs name the same post, ignoring route form."""
-    id_a, id_b = canonical_post_id(a), canonical_post_id(b)
-    return bool(id_a) and id_a == id_b
+def find_crosspost_original_path(text: str | None, own_path: str | None = None) -> str | None:
+    """Identify the original post path for a crosspost.
 
+    Structured parent metadata is handled separately. Text parsing accepts:
+    * an explicitly labelled Original Post permalink (no English 'crosspost'
+      keyword required), and
+    * a permalink in a 'crosspost' context that is not the child itself.
 
-def _permitted_reddit_link(url: str) -> bool:
-    """A full URL is only a parent candidate on a reddit.com host."""
-    match = re.match(r"(?i)^https?://([^/]+)", url or "")
-    if not match:
-        return True  # scheme-relative/path-only: nothing to reject here
-    host = match.group(1).split("@")[-1].split(":")[0].lower()
-    return host in REDDIT_PERMITTED_HOSTS or host.endswith(".reddit.com")
-
-
-def find_crosspost_original_path(text: str | None, own_path: str | None = None,
-                                 *, parent_id: str | None = None,
-                                 structured_parent: dict | None = None) -> str | None:
+    Comparisons use the canonical post id so a slugged child permalink cannot
+    be mistaken for the original. Arbitrary body links are not parents.
     """
-    Round 14 crosspost detection: a crosspost's content (RSS content, redlib
-    post area, proxy body) contains the word 'crosspost' AND a permalink to
-    the ORIGINAL post ("u/x crossposted this from r/Y — original post").
-    Returns the original path '/r/<sub>/comments/<id>/' or None.
-
-    2026-10-15 corrections (incident AnantaLeaks_1x6h1mf):
-
-    * structured parent metadata (``structured_parent``) and an explicit
-      parent ID (``parent_id``) are honoured even when the English word
-      "crosspost" is absent — a parent relationship that is already
-      established needs no keyword to prove it;
-    * the mirror's own explicit parent marker ("Original Post") counts too,
-      but only inside a matched-post context, so arbitrary body links are
-      still not parents;
-    * self-links are rejected by canonical post ID, so a child's own
-      permalink (any slug, alias, query or trailing slash) can never be
-      returned as its "original";
-    * malformed IDs and foreign hosts are rejected.
-    """
-    own_id = canonical_post_id(own_path)
-
-    # 1. Structured parent metadata already proves the relationship.
-    if isinstance(structured_parent, dict):
-        candidate = (structured_parent.get("path")
-                     or structured_parent.get("permalink")
-                     or structured_parent.get("id"))
-        candidate_id = canonical_post_id(candidate)
-        if candidate_id and candidate_id != own_id:
-            normalized = normalize_reddit_path(str(candidate) + "/")
-            if normalized:
-                return normalized
-            if POST_ID_RE.match(candidate_id):
-                return f"/comments/{candidate_id}/"
-
-    # 2. An explicit parent ID from the matching record.
-    parent = canonical_post_id(parent_id)
-    if parent and parent != own_id:
-        return f"/comments/{parent}/"
-
     if not text:
         return None
-    if not PARENT_MARKER_RE.search(text):
-        # Not a matched-post parent context: arbitrary body links are not
-        # parent candidates, and this is deliberately NOT "first link wins".
+    own_id = canonical_post_id(own_path)
+
+    labeled = _LABELED_ORIGINAL_RE.search(text)
+    if labeled:
+        raw = next((g for g in labeled.groups() if g), None)
+        if raw:
+            path = _normalized_foreign_safe_path(raw, text, labeled.start())
+            if path and not (own_id and canonical_post_id(path) == own_id):
+                return path
+
+    if "crosspost" not in text.lower():
         return None
-
-    # A permalink-looking path inside a FOREIGN-host URL is not a Reddit
-    # parent, so remember which spans belong to a non-reddit.com URL.
-    foreign_spans = [
-        m.span() for m in ANY_URL_RE.finditer(text)
-        if not _permitted_reddit_link(m.group(0))
-    ]
-
-    def _is_foreign(span: tuple[int, int]) -> bool:
-        return any(start <= span[0] < end for start, end in foreign_spans)
-
-    # Permalink scan first: this preserves the historical returned form
-    # ('/r/<sub>/comments/<id>/' for a subreddit post, the full canonical
-    # '/user/<name>/comments/<id>/<slug>/' for a profile post). What changed
-    # is only how SELF links and foreign hosts are rejected — by canonical
-    # post ID and verified host, not by comparing a full path string against
-    # a truncated regex match.
     for m in CROSSPOST_PERMALINK_RE.finditer(text):
-        if _is_foreign(m.span()):
+        path = _normalized_foreign_safe_path(m.group(0), text, m.start())
+        if not path:
             continue
-        raw = m.group(0)
-        candidate_id = canonical_post_id(raw)
-        if not candidate_id or candidate_id == own_id:
+        if own_id and canonical_post_id(path) == own_id:
             continue
-        return normalize_reddit_path(raw.rstrip("/") + "/") or (raw.rstrip("/") + "/")
-
-    # Fallback: a full reddit.com URL whose path form the permalink regex did
-    # not catch. Host is verified here, so this is not "first link wins".
-    for m in REDDIT_LINK_RE.finditer(text):
-        if _is_foreign(m.span()) or not _permitted_reddit_link(m.group(0)):
-            continue
-        candidate_id = canonical_post_id(m.group(2))
-        if not candidate_id or candidate_id == own_id:
-            continue
-        normalized = normalize_reddit_path(m.group(2).rstrip("/") + "/")
-        if normalized:
-            return normalized
+        return path
     return None
 
 
-def crosspost_parent_from_json(post_json: dict | None) -> tuple[dict | None, str | None]:
-    """Standard structured parent metadata from a Reddit post dict.
+def parent_fullname_id(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"(?:t3_)?([a-zA-Z0-9]+)", value.strip())
+    return match.group(1) if match else None
 
-    Returns ``(parent_record_or_None, parent_id_or_None)``. Reddit carries the
-    relationship in ``crosspost_parent_list`` (a one-element list of the
-    parent post) and in the flat ``crosspost_parent_id``; the older
-    ``crosspost_post_link`` string is a convenience, not the only evidence, and
-    is not always present.
+
+def structured_crosspost_parent(record) -> dict | None:
+    """One hop from Reddit/archive structured fields. Never treats self as parent."""
+    if not isinstance(record, dict):
+        return None
+    parents = record.get("crosspost_parent_list")
+    if isinstance(parents, list) and parents and isinstance(parents[0], dict):
+        return parents[0]
+    pid = parent_fullname_id(record.get("crosspost_parent"))
+    if pid:
+        return {"id": pid}
+    link = record.get("crosspost_post_link")
+    if isinstance(link, str) and link.strip():
+        path = normalize_reddit_path(link)
+        if path:
+            return {"id": extract_post_id(path), "permalink": path}
+    return None
+
+
+def extract_vreddit_id_from_media_url(url: str | None) -> str | None:
+    """v.redd.it id from a motion-video URL, including percent-encoded query values.
+
+    An external-preview thumbnail is not video evidence and is never decoded
+    as a guessed video id.
     """
-    if not isinstance(post_json, dict):
-        return None, None
-    parents = post_json.get("crosspost_parent_list")
-    if isinstance(parents, list):
-        for entry in parents:
-            if not isinstance(entry, dict):
-                continue
-            parent_id = canonical_post_id(entry.get("id") or entry.get("name")
-                                          or entry.get("permalink"))
-            if parent_id:
-                record = {
-                    "id": parent_id,
-                    "path": normalize_reddit_path(str(entry.get("permalink") or "") + "/"),
-                    "author": entry.get("author"),
-                    "provenance": "crosspost_parent_list",
-                }
-                return record, parent_id
-    flat = canonical_post_id(post_json.get("crosspost_parent_id"))
-    if flat:
-        return {"id": flat, "path": None, "provenance": "crosspost_parent_id"}, flat
-    return None, None
+    if not url or "external-preview.redd.it" in url:
+        return None
+    found = extract_vreddit_id(url)
+    if found:
+        return found
+    try:
+        return extract_vreddit_id(unquote(url))
+    except Exception:
+        return None
 
+
+def _parent_record_path(parent: dict) -> str | None:
+    permalink = parent.get("permalink")
+    if isinstance(permalink, str) and permalink.strip():
+        return normalize_reddit_path(permalink) or (
+            permalink if permalink.startswith("/") else None)
+    return None
+
+
+def resolve_crosspost_source(*, own_path: str | None, base: dict | None,
+                             post_json: dict | None = None,
+                             arctic: dict | None = None,
+                             extra_text: str = "") -> dict:
+    """Pick at most one original. Child identity is never replaced."""
+    own_id = canonical_post_id(own_path)
+    ordered = []
+    known = (base or {}).get("crosspost_orig_path")
+    if isinstance(known, str) and known.strip():
+        ordered.append((known, "known-orig-path", None))
+    for record, provenance in (
+        (post_json, "structured-json"),
+        (arctic, "structured-archive"),
+    ):
+        parent = structured_crosspost_parent(record)
+        if parent:
+            ordered.append((_parent_record_path(parent), provenance, parent))
+    blob_parts = [
+        extra_text,
+        str((base or {}).get("content_html") or ""),
+        str((base or {}).get("body") or ""),
+    ]
+    if isinstance(post_json, dict):
+        blob_parts.append(str(post_json.get("selftext") or ""))
+    found = find_crosspost_original_path("\n".join(blob_parts), own_path)
+    if found:
+        ordered.append((found, "explicit-parent-link", None))
+
+    for path, provenance, parent in ordered:
+        pid = extract_post_id(path or "") or (parent.get("id") if parent else None)
+        if pid and own_id and str(pid).lower() == str(own_id).lower():
+            continue
+        npath = normalize_reddit_path(path) if path else None
+        if npath and is_same_reddit_post(npath, own_path):
+            continue
+        vred = None
+        fallback = None
+        if parent:
+            vred, fallback = arctic_video_info(parent)
+        if npath or pid:
+            return {
+                "path": npath,
+                "id": pid or (extract_post_id(npath) if npath else None),
+                "provenance": provenance,
+                "vred_id": vred,
+                "fallback_url": fallback,
+                "record": parent,
+            }
+    return {}
 
 
 def _crosspost_notice_clean(body: str | None, title: str | None) -> tuple:
@@ -1654,6 +1662,8 @@ def arctic_video_info(post) -> tuple:
     Reddit fallback_url is NOT guaranteed to include audio.
     """
     media = post.get("media") if isinstance(post, dict) else None
+    if not isinstance(media, dict) and isinstance(post, dict):
+        media = post.get("secure_media")
     video = media.get("reddit_video") if isinstance(media, dict) else None
     url = video.get("fallback_url") if isinstance(video, dict) else None
     if not isinstance(url, str) or not re.match(r"https://v\.redd\.it/", url):
@@ -2765,11 +2775,17 @@ async def fetch_combined_feed(session: aiohttp.ClientSession):
             if sub:
                 covered.add(sub)
         logging.info(f"Combined feed OK: {len(feed.entries)} entries covering {len(covered)} subreddit(s).")
+        _report_feed(len(feed.entries), usable=True)
+        for sub in covered:
+            _report_target(sub, usable=True)
+    else:
+        _report_feed(0, usable=False)
     return feed
 
 
 async def fetch_working_reddit_feed(session: aiohttp.ClientSession, subreddit: str):
     """Fallback mode: tries each RSS source in order for one subreddit."""
+    _report_target(subreddit, usable=False)
     for instance in REDDIT_RSS_INSTANCES:
         feed_url = f"{instance}/r/{subreddit}/new/.rss"
         if REDDIT_FEED_TOKEN and "reddit.com" in instance:
@@ -2777,6 +2793,8 @@ async def fetch_working_reddit_feed(session: aiohttp.ClientSession, subreddit: s
         feed = await _fetch_feed(session, feed_url, instance)
         if feed:
             logging.info(f"Successfully fetched r/{subreddit} from {instance}")
+            _report_feed(len(feed.entries), usable=True)
+            _report_target(subreddit, usable=True)
             return feed
         # round 15 (2026-09-20): eddrit.com — token-free RSS fallback.
         # Sits AFTER redlib.miningtcup.me (token-gated, tried first) and
@@ -2794,11 +2812,14 @@ async def fetch_working_reddit_feed(session: aiohttp.ClientSession, subreddit: s
                         f"eddrit feed OK: r/{subreddit} -> "
                         f"{len(eddrit_feed.entries)} entries")
                     logging.info(f"Successfully fetched r/{subreddit} from {EDDRIT_BASE}")
+                    _report_feed(len(eddrit_feed.entries), usable=True)
+                    _report_target(subreddit, usable=True)
                     return eddrit_feed
             except Exception as e:
                 logging.error(
                     f"eddrit feed failed for r/{subreddit}: {e} — falling through")
     logging.warning(f"Could not fetch valid RSS feed for r/{subreddit} from any instance.")
+    _report_feed(0, usable=False)
     return None
 
 
@@ -3720,27 +3741,6 @@ def extract_vreddit_id(text: str | None) -> str | None:
     return m.group(1) if m else None
 
 
-def video_id_from_proxy_url(url: str | None) -> str | None:
-    """The Reddit video ID carried inside a proxy render URL.
-
-    Proxy services hand back ``render/video.mp4?videoUrl=<percent-encoded
-    v.redd.it URL>&audioUrl=...``. The child post ID is NOT the media ID, so a
-    crosspost child with no video of its own must inherit the ORIGINAL's
-    verified video ID here or the existing bounded 1080p quality selector is
-    silently skipped (2026-10-15, incident AnantaLeaks_1x6h1mf).
-    """
-    if not url:
-        return None
-    found = extract_vreddit_id(url)
-    if found:
-        return found
-    try:
-        from urllib.parse import unquote
-        return extract_vreddit_id(unquote(str(url)))
-    except Exception:
-        return None
-
-
 def extract_redgifs_url(text: str | None) -> str | None:
     m = REDGIFS_RE.search(text or "")
     if not m:
@@ -4248,6 +4248,48 @@ async def _dedupe_media_final_urls(session: aiohttp.ClientSession, media: list,
     return out
 
 
+async def discover_original_for_media(session, *, path: str | None, base: dict,
+                                      post_json: dict | None, label: str = ""):
+    """Resolve at most one original for media. Child identity stays on the card."""
+    child_arctic = None
+    if not post_json and path:
+        child_id = extract_post_id(path) or ""
+        if child_id:
+            child_arctic = await fetch_arctic_post(session, child_id, label)
+    source = resolve_crosspost_source(
+        own_path=path, base=base, post_json=post_json, arctic=child_arctic)
+    logging.info(
+        f"[{label or 'media'}] original-source "
+        f"child_id={extract_post_id(path or '') or 'none'} "
+        f"source_id={source.get('id') or 'none'} "
+        f"source_path={source.get('path') or 'none'} "
+        f"provenance={source.get('provenance') or 'none'} "
+        f"video_evidence={source.get('vred_id') or 'none'}")
+    return source, child_arctic
+
+
+def _motion_video_url(item: dict | None) -> str | None:
+    if not isinstance(item, dict) or item.get("kind") != "video":
+        return None
+    url = str(item.get("url") or "")
+    if "/render/audio" in url.lower():
+        return None
+    return url or None
+
+
+def _log_media_outcome(label: str, media: list, *, fallback_reason: str | None = None):
+    kinds = [x.get("kind") for x in media if isinstance(x, dict)]
+    kind = kinds[0] if kinds else "none"
+    provider = "none"
+    for item in media:
+        if isinstance(item, dict) and item.get("url"):
+            provider = _provider_for_url(item["url"]) or "unknown"
+            break
+    logging.info(
+        f"[{label or 'media'}] media-outcome kind={kind} provider={provider} "
+        f"fallback={fallback_reason or 'none'}")
+
+
 async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                              post_json: dict | None,
                              path: str | None = None, label: str = "") -> dict:
@@ -4304,10 +4346,20 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
         elif not yt_url:
             yt_url = extract_youtube_url(str(post_json.get("selftext") or ""))
         yt_vid_early, _ = extract_youtube_id(yt_url)
+        source, _ = await discover_original_for_media(
+            session, path=path, base=base, post_json=post_json, label=label)
+        if source.get("vred_id") and not vid:
+            vid = source["vred_id"]
+            fallback_url = source.get("fallback_url") or fallback_url
         has_video = bool(vid or yt_vid_early or base.get("redgifs_url"))
-        if post_json.get("crosspost_post_link"):
-            crosspost = {"url": post_json["crosspost_post_link"],
-                         "path": normalize_reddit_path(post_json["crosspost_post_link"])}
+        if source.get("path") and not is_same_reddit_post(source.get("path"), path):
+            crosspost = {"url": f"https://www.reddit.com{source['path']}",
+                         "path": source["path"]}
+        elif post_json.get("crosspost_post_link"):
+            linked = normalize_reddit_path(post_json["crosspost_post_link"])
+            if linked and not is_same_reddit_post(linked, path):
+                crosspost = {"url": post_json["crosspost_post_link"],
+                             "path": linked}
         # crosspost full-embed: fetch the ORIGINAL post (1 level only)
         if crosspost:
             orig_id = extract_post_id(crosspost["path"] or "")
@@ -4388,73 +4440,49 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
     # the RSS content no media), so media + stats come from the ORIGINAL
     # post; the card keeps the crosspost URL + the "🔁 Crosspost of" line.
     fetch_path = path
-    if not post_json and base.get("crosspost_orig_path"):
-        candidate_path = base["crosspost_orig_path"]
-        # A parent relationship is one hop to a DIFFERENT post. A child's own
-        # permalink under another slug or profile alias is a self-link, not an
-        # original, and following it would silently re-resolve the child.
-        if is_same_post(candidate_path, path):
-            logging.info(f"[{label or 'native'}] ignoring a self-referential "
-                         f"crosspost parent ({candidate_path} is this post).")
-        else:
-            fetch_path = candidate_path
+    arctic = None
+    child_arctic = None
+    if not post_json:
+        source, child_arctic = await discover_original_for_media(
+            session, path=path, base=base, post_json=post_json, label=label)
+        orig_path = source.get("path")
+        if orig_path and not is_same_reddit_post(orig_path, path):
+            fetch_path = orig_path
             crosspost = {"url": f"https://www.reddit.com{fetch_path}", "path": fetch_path}
             logging.info(f"[{label or 'native'}] crosspost — media/stats from the "
-                         f"original post {fetch_path}")
-    # The posting identity never follows the media source: the card keeps the
-    # CHILD's id, permalink, webhook route and dedup key. `media_source_path`
-    # only records where media came from.
-    media_source_path = fetch_path
+                         f"original post {fetch_path} ({source.get('provenance')})")
+        if source.get("vred_id") and not vid:
+            vid = source["vred_id"]
+            fallback_url = source.get("fallback_url") or fallback_url
+        has_video = bool(vid or yt_vid_early or base.get("redgifs_url"))
 
     # Resolve archive crossposts BEFORE asking proxies for media. Keep the
     # crosspost thread/title/author on the card; media comes from its original.
-    arctic = None
     if not post_json and fetch_path:
-        arctic = await fetch_arctic_post(session, extract_post_id(fetch_path) or "", label)
+        fetch_id = extract_post_id(fetch_path) or ""
+        child_id = extract_post_id(path or "") or ""
+        if child_arctic is not None and fetch_id == child_id:
+            arctic = child_arctic
+        else:
+            arctic = await fetch_arctic_post(session, fetch_id, label)
         original = arctic_crosspost_orig(arctic)
-        if original and not crosspost:
+        if original:
             original_path = original.get("permalink")
             if (isinstance(original_path, str)
                     and re.fullmatch(r"/(?:r|user)/[^/]+/comments/[a-z0-9]+/[^?#]*",
                                      original_path)
-                    and not is_same_post(original_path, path)):
-                fetch_path = original_path
-                media_source_path = fetch_path
-                crosspost = {"url": f"https://www.reddit.com{fetch_path}", "path": fetch_path}
+                    and not is_same_reddit_post(original_path, path)):
+                if not crosspost:
+                    fetch_path = original_path
+                    crosspost = {"url": f"https://www.reddit.com{fetch_path}", "path": fetch_path}
+                    logging.info(f"[{label}] crosspost detected via Arctic Shift: {fetch_path}")
                 arctic = original
-                logging.info(f"[{label}] crosspost detected via Arctic Shift: {fetch_path}")
-        # 2026-10-15 (incident AnantaLeaks_1x6h1mf): the matching archive
-        # record can carry standard structured parent metadata even when the
-        # RSS/proxy text never used the word "crosspost". One bounded lookup of
-        # that parent — no recursive scrape, no arbitrary URL fetching.
-        if not crosspost:
-            _record, _parent_id = crosspost_parent_from_json(arctic)
-            if _parent_id and not is_same_post(_parent_id, path):
-                parent_path = (_record or {}).get("path") or f"/comments/{_parent_id}/"
-                parent_json = await fetch_arctic_post(session, _parent_id, label)
-                if parent_json:
-                    fetch_path = parent_path
-                    media_source_path = fetch_path
-                    crosspost = {"url": f"https://www.reddit.com{fetch_path}",
-                                 "path": fetch_path}
-                    arctic = parent_json
-                    logging.info(f"[{label}] crosspost parent from structured "
-                                 f"archive metadata: {_parent_id} -> {fetch_path}")
     arctic_items = arctic_gallery_items(arctic)
     a_vid, a_fb = arctic_video_info(arctic)
     arctic_is_video = bool(a_vid)
     if a_vid:
         vid, fallback_url = a_vid, a_fb
         has_video = True
-    # 2026-10-15 (incident AnantaLeaks_1x6h1mf): the image branches below used
-    # to be guarded by `not arctic_is_video` alone, so an archive MISS let an
-    # image-only proxy answer win and set proxy_media_used=True — which then
-    # blocked the native video chain underneath. Video evidence is now retained
-    # independently of any image fallback: a verified v.redd.it ID, a matched
-    # reddit_video object or a known source video candidate all count. An
-    # external-preview thumbnail by itself is not video evidence.
-    video_expected = bool(has_video or vid or arctic_is_video
-                          or base.get("vred_id") or base.get("redgifs_url"))
     # Structured text wins over flattened og descriptions. Archive text is
     # used only when the RSS/redlib body is empty.
     if arctic and not (body or "").strip():
@@ -4480,11 +4508,6 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
     # posts (the DASH chain handles those). Any failure here simply falls
     # through to the round-12 native path.
     proxy_media_used = False
-    # Image items a proxy returned for a post that is known to carry a
-    # video. Held as a bounded poster/text fallback ONLY: they never mark
-    # the proxy as the media source, so the native video chain still runs.
-    proxy_poster_fallback: list[dict] = []
-    video_quality_upgraded = False
     redlib_items: list[dict] = []
     redlib_done = False
     if not post_json and PROXY_MEDIA and reddit_proxy is not None and fetch_path:
@@ -4502,9 +4525,15 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
             logging.info(f"[{label or 'proxy'}] proxy fetch error: {results[0]}")
         if proxy:
             proxy_video = next((m for m in proxy["media"]
-                                if m["kind"] == "video"), None)
+                                if _motion_video_url(m)), None)
             proxy_images = [m for m in proxy["media"]
-                            if m["kind"] != "video"]
+                            if m["kind"] != "video"
+                            and "/render/audio" not in str(m.get("url") or "").lower()]
+            if proxy_video and not vid:
+                inherited = extract_vreddit_id_from_media_url(proxy_video.get("url"))
+                if inherited:
+                    vid = inherited
+                    has_video = True
             video_ok = False
             if proxy_video:
                 # range-check the muxed mp4 (has audio)
@@ -4532,23 +4561,10 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 # Reddit video — the validated proxy result is the held base,
                 # so this can only ever improve it (video-only; the helper
                 # returns the base unchanged on any failure).
-                #
-                # 2026-10-15: the media ID is the ORIGINAL's verified Reddit
-                # video ID, not the child post ID. Recovering a playable
-                # default-720p source embed must not skip the existing bounded
-                # 1080p opportunity just because the child carried no video ID.
-                _q_vid = (vid
-                          or video_id_from_proxy_url(proxy_video["url"])
-                          or extract_vreddit_id(proxy.get("body") or ""))
-                if not vid and _q_vid:
-                    logging.info(f"[{label or 'proxy'}] inherited media id "
-                                 f"{_q_vid} from the matched original's video URL "
-                                 f"for the quality selector.")
                 _q_url = await proxy_video_quality_upgrade(
-                    session, _q_vid, proxy_video["url"], label or "proxy")
+                    session, vid, proxy_video["url"], label or "proxy")
                 if _q_url and _q_url != proxy_video["url"]:
                     proxy_video = dict(proxy_video, url=_q_url)
-                    video_quality_upgraded = True
                 # video post: the proxy's muxed mp4 tile ONLY (never a dup
                 # first-frame thumbnail)
                 media = [proxy_video]
@@ -4556,7 +4572,12 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 proxy_media_used = True
                 logging.info(f"[{label or 'proxy'}] card media via "
                              f"{_provider_for_url(proxy_video['url'])} — 1 video tile.")
-            elif (not video_dead and not video_expected and redlib_items
+            elif has_video:
+                # Stills are not an eligible fallback for a video post.
+                _use_proxy_text()
+                logging.info(f"[{label or 'proxy'}] proxy returned stills for a video "
+                             f"post — native video chain will run.")
+            elif (not video_dead and not arctic_is_video and redlib_items
                   and any(x["kind"] == "video" for x in redlib_items)):
                 # round 38c: a redlib gallery WITH a video item is the most
                 # complete source — every photo + the video tile (1wt59lm)
@@ -4566,12 +4587,12 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 proxy_media_used = True
                 logging.info(f"[{label or 'proxy'}] card media via redlib harvest "
                              f"(gallery video) — {len(media)} item(s).")
-            elif (not video_dead and not video_expected and arctic_items
+            elif (not video_dead and not arctic_is_video and arctic_items
                   and len(arctic_items) >= max(1, len(proxy_images))):
                 media = [dict(item) for item in arctic_items]
                 _use_proxy_text()
                 proxy_media_used = True
-            elif (not video_dead and not video_expected and redlib_items
+            elif (not video_dead and not arctic_is_video and redlib_items
                   and len(redlib_items) >= max(1, len(proxy_images))):
                 # image post: the COMPLETE ordered gallery from the redlib
                 # harvest — it lists EVERY item incl. GIFs (the redditez og
@@ -4583,26 +4604,12 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 logging.info(f"[{label or 'proxy'}] card media via redlib harvest "
                              f"— {len(media)} item(s) (body/stats via "
                              f"{proxy['service']}).")
-            elif not video_dead and not video_expected and proxy_images:
+            elif not video_dead and not arctic_is_video and proxy_images:
                 media = proxy_images
                 _use_proxy_text()
                 proxy_media_used = True
                 logging.info(f"[{label or 'proxy'}] card media via {proxy['service']} "
                              f"— {len(media)} item(s).")
-            elif not video_dead and video_expected and proxy_images:
-                # 2026-10-15 (incident AnantaLeaks_1x6h1mf): an image-only
-                # proxy answer for a post with established video evidence.
-                # Keep the poster/text/stats as a bounded fallback, but do NOT
-                # mark the proxy as the media source — a poster must never
-                # suppress the native video chain underneath, which is the only
-                # thing that can still produce the real video.
-                _use_proxy_text()
-                proxy_poster_fallback = [dict(x) for x in proxy_images]
-                logging.info(f"[{label or 'proxy'}] {proxy['service']} returned "
-                             f"{len(proxy_poster_fallback)} image item(s) for a post "
-                             f"with established video evidence — keeping them only "
-                             f"as a text/stats/poster fallback and running the "
-                             f"native video chain.")
             else:
                 # no usable proxy media (a dead proxy video counts too — the
                 # native DASH chain has audio)
@@ -4740,29 +4747,15 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
         logging.info(f"[{label or 'native'}] crosspost detected via the mirror's "
                      f"notice (original subreddit r/{_notice_sub}) — notice text "
                      f"removed from the body.")
-    # 2026-10-15 (incident AnantaLeaks_1x6h1mf): the applicable video paths
-    # have now been exhausted. Only here — never before the native chain — may
-    # a held proxy poster become the card's media, and the reason is stated so
-    # "kept for text/stats" followed by an image is never summarized as a
-    # successful video.
-    media_fallback_reason = None
-    if (not media and proxy_poster_fallback
-            and not any(x["kind"] in ("video", "gif") for x in media)):
-        media = proxy_poster_fallback
-        media_fallback_reason = ("no-validated-video-after-native-chain;"
-                                 "proxy-poster-retained-as-image-fallback")
-        logging.info(f"[{label or 'proxy'}] no validated motion video was available "
-                     f"after the native chain — delivering the proxy poster as an "
-                     f"IMAGE fallback ({len(media)} item(s)). This is not a video.")
-    elif media_fallback_reason is None and video_expected and not any(
-            x["kind"] == "video" for x in media):
-        media_fallback_reason = "video-evidence-without-validated-video"
-
     # round 29 (2026-09-19): mirrors can list ONE photo under two different
     # wrapper URLs (two og:image redirects resolving to the same file) —
     # collapse to one tile. Applies to EVERY source (proxy/redlib/RSS/Arctic).
     media = await _dedupe_media_final_urls(session, media)
     media = media[:MAX_GALLERIES * MEDIA_PER_GALLERY]
+    fallback_reason = None
+    if has_video and not any(_motion_video_url(x) for x in media):
+        fallback_reason = "video-unresolved"
+    _log_media_outcome(label, media, fallback_reason=fallback_reason)
     return {
         "title": title,
         "author": _clean_author_name(author),
@@ -4775,23 +4768,6 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
         "youtube_id": yt_vid,
         "youtube_live": yt_live,
         "full_mode": bool(post_json),
-        # Selected identity/outcome, observable. The CHILD keeps the posting
-        # identity (id, permalink, webhook route, dedup key); `media_source`
-        # only records where the media actually came from, how the parent was
-        # discovered, and why any fallback was taken.
-        "media_source": {
-            "path": media_source_path,
-            "is_crosspost_original": bool(crosspost) and media_source_path != path,
-            "provenance": ("structured-parent" if crosspost and str(
-                               (crosspost or {}).get("provenance") or "").startswith("crosspost_parent")
-                           else "arctic-archive" if crosspost and arctic
-                           else "matched-post-text" if crosspost else "self"),
-            "video_expected": bool(video_expected),
-            "media_kinds": sorted({str(x.get("kind")) for x in media}),
-            "provider": _provider_for_url(media[0]["url"]) if media else None,
-            "fallback_reason": media_fallback_reason,
-            "quality_upgraded": video_quality_upgraded,
-        },
     }
 
 
@@ -5322,8 +5298,15 @@ def test_post_entries(now: float) -> list:
 # ■ MAIN
 # ---------------------------------------------------------------------------
 async def main():
+    global _run_report
+    _run_report = RunReport("reddit_monitor", "v3") if RunReport else None
+    if _run_report is not None:
+        _run_report.set_configured(len(SUBREDDITS))
+        _run_report.start_monitor()
     if not SUBREDDITS:
         logging.error("No subreddits configured in SUBREDDITS environment variable.")
+        if _run_report is not None:
+            _run_report.write()
         return
     if not REDDIT_FEED_TOKEN:
         logging.warning("REDDIT_FEED_TOKEN not set — running anonymously. The combined feed "
@@ -5357,17 +5340,6 @@ async def main():
     posted = load_posted()
     pending = load_pending()
     posted_messages = load_posted_messages()
-
-    # 2026-10-15 maintenance round: one bounded structured run report. Every
-    # counter below is a real numeric outcome — never a count of matching log
-    # lines — and unique subreddits are tracked separately from HTTP requests.
-    report = _run_report.RunReport.from_env() if _run_report is not None else None
-    if report is not None:
-        for _sub in SUBREDDITS:
-            report.note_target(_sub, configured=True)
-        report.set("targets.configured", len(SUBREDDITS))
-        report.set("durations.setup", report.elapsed())
-
     _listing_cache.clear()
     _redlib_post_page_cache.clear()
     _proxy_post_cache.clear()
@@ -5411,23 +5383,6 @@ async def main():
         else:
             # ---- PRIMARY: one combined request for all subreddits ---------
             combined = await fetch_combined_feed(session)
-            if report is not None:
-                # A feed that answered is not the same as a usable feed: an
-                # HTTP-200 bot-check page parses to zero entries.
-                report.note_request()
-                _entries = getattr(combined, "entries", None)
-                if _entries:
-                    report.incr("feeds.parsed")
-                    report.incr("feeds.http_ok")
-                    report.incr("outcomes.entries", len(_entries))
-                    for _sub in SUBREDDITS:
-                        report.note_target(_sub, usable=True)
-                elif combined is not None:
-                    report.incr("feeds.challenged")
-                    report.warn("combined feed returned HTTP 200 but 0 entries "
-                                "(bot check / stale) — not a usable feed")
-                else:
-                    report.incr("feeds.invalid")
             new_posts = []  # (subreddit, path, unique_key, published_ts, activity_ts, entry)
 
             def collect(entries, known_subreddit: str | None):
@@ -5509,11 +5464,12 @@ async def main():
             _verify_dedup_save(posted_at_start, posted, saved)
             save_pending(pending)
             save_posted_messages(posted_messages)
-            _flush_run_report(report, "completed")
+            if _run_report is not None:
+                _run_report.mark_local_save("saved")
+                _run_report.end_monitor("completed")
+                _run_report.write()
             return
 
-        if report is not None:
-            report.set("targets.attempted_candidates", total_found)
         logging.info(f"Found {total_found} new Reddit posts. Building V3 cards...")
 
         # newest first per sub for stable ordering
@@ -5540,9 +5496,7 @@ async def main():
             webhook_url = get_webhook_for_subreddit(subreddit)
             if not webhook_url:
                 logging.error(f"No webhook configured for r/{subreddit}. Skipping {unique_key}.")
-                if report is not None:
-                    report.incr("outcomes.skipped")
-                    report.note_reason("skipped.", "no-webhook")
+                _report_outcome("skipped", "no-webhook")
                 continue
 
             reddit_url = f"https://www.reddit.com{path}"
@@ -5570,6 +5524,7 @@ async def main():
                                   - (now - float(_pend.get("last_checked") or 0)))
                     logging.info(f"[{unique_key}] pending ({_pend.get('reason')}) — "
                                  f"skipping recheck, due again in ~{_due_in}s.")
+                _report_outcome("held", str(_pend.get("reason") or "pending"))
                 continue
 
             # ---- round 64: stateless 30s fresh hold (section A) ---------
@@ -5600,9 +5555,6 @@ async def main():
                     logging.info(f"[{unique_key}] pristine /new listing unavailable "
                                  f"for r/{subreddit} this tick (outage, not absence) "
                                  f"— skipped (not cached), retried next tick.")
-                    if report is not None:
-                        report.incr("outcomes.skipped")
-                        report.note_reason("skipped.", "listing-unavailable")
                     continue
                 _r64_ids, _r64_oldest_age = _r64_listing
                 _r64_candidate_id = (extract_post_id(path) or "").lower()
@@ -5706,6 +5658,7 @@ async def main():
                     logging.info(f"[{unique_key}] post appears removed/deleted/"
                                  f"awaiting approval ({_removed}) — skipping, not "
                                  f"cached (will post once approved).")
+                    _report_outcome("held", _removed)
                     continue
 
             # ---- round 20 + round 32: liveness gate for ALL sourced posts ----
@@ -5737,6 +5690,7 @@ async def main():
                     logging.info(f"[{unique_key}] post not verified live "
                                  f"({_why}) — skipping, not cached (will "
                                  f"post once approved/restored).")
+                    _report_outcome("held", "not-live")
                     continue
 
             try:
@@ -5763,6 +5717,7 @@ async def main():
                                  f"source served any yet (Arctic fills those "
                                  f"asynchronously) — skipping, not cached "
                                  f"(retries next run).")
+                    _report_outcome("held", "media-wait")
                     continue
                 # Round 25: known partial archive galleries wait without caching.
                 # Unknown counts cannot gate; video cards intentionally use one tile.
@@ -5788,6 +5743,7 @@ async def main():
                 if DRY_RUN:
                     kinds = ",".join(sorted({m["kind"] for m in data["media"]})) or "text"
                     mode = "full" if data["full_mode"] else "native"
+                    _report_outcome("skipped", "dry-run")
                     logging.info(f"DRY RUN (Discord NOT touched): {unique_key} "
                                  f"(media={kinds} | {mode} | {len(data['media'])} item(s))")
                     logging.info(f"DRY RUN payload for {unique_key}:\n"
@@ -5850,30 +5806,10 @@ async def main():
                             _held = max(0.0, now - _first) if _first else 0.0
                             _held_note = (f" | held {_held / 60:.1f}min as "
                                           f"'{_pend_entry.get('reason')}'")
+                        _report_outcome("posted")
                         logging.info(f"Reddit V3 Posted: {unique_key} (media={kinds} | {mode} | "
                                      f"{len(data['media'])} item(s)) | LATENCY "
                                      f"{_latency / 60:.1f}min after creation{_held_note}")
-                        if report is not None:
-                            # One successful delivery is one post — three posts
-                            # from one subreddit are three, not one log line.
-                            report.incr("outcomes.posted")
-                            report.note_reason("posted.", "discord-ok")
-                            report.note_target(subreddit, usable=True)
-                            _src = data.get("media_source") or {}
-                            if "video" in str(kinds):
-                                report.incr("media.video")
-                            else:
-                                report.incr("media.image")
-                            if _src.get("is_crosspost_original"):
-                                report.incr("media.crosspost_resolved")
-                            if _src.get("quality_upgraded"):
-                                report.incr("media.quality_upgrades")
-                            if _src.get("fallback_reason"):
-                                report.note_fallback(str(_src["fallback_reason"]))
-                                # A "kept for text/stats" outcome followed by an
-                                # image must never be summarized as a video.
-                                if "video" not in str(kinds):
-                                    report.note_reason("posted.", "image-not-video")
                         # Round 66: a body that exceeded the card budget
                         # continues in follow-up messages — same webhook,
                         # same mechanism/ordering as the YouTube link
@@ -5954,16 +5890,8 @@ async def main():
                     else:
                         body = await resp.text()
                         logging.error(f"Discord error {resp.status} for {unique_key}: {body}")
-                        if report is not None:
-                            report.incr("outcomes.held")
-                            report.note_reason("held.", f"discord-{resp.status}")
-                            report.error(f"{unique_key}: Discord returned {resp.status}")
             except Exception as e:
                 logging.error(f"Failed building/posting {unique_key}: {e}")
-                if report is not None:
-                    report.incr("outcomes.held")
-                    report.note_reason("held.", "build-or-post-failure")
-                    report.error(f"{unique_key}: {type(e).__name__}")
 
         if proxy_video_heal_queue and not DRY_RUN:
             logging.info(f"MEDIA-HEAL: {len(proxy_video_heal_queue)} unresolved Reddit "
@@ -5981,14 +5909,18 @@ async def main():
 
     if DRY_RUN:
         logging.info("DRY RUN finished: cache NOT saved, Discord NOT touched.")
-        _flush_run_report(report, "completed")
+        if _run_report is not None:
+            _run_report.end_monitor("completed")
+            _run_report.write()
     else:
         saved = save_posted(posted, frozenset(posted - posted_at_start))
         _verify_dedup_save(posted_at_start, posted, saved)
         save_pending(pending)
         save_posted_messages(posted_messages)
-        _missing = (posted - posted_at_start) - saved
-        _flush_run_report(report, "degraded" if _missing else "completed")
+        if _run_report is not None:
+            _run_report.mark_local_save("saved")
+            _run_report.end_monitor("completed")
+            _run_report.write()
         logging.info("Reddit V3 Monitor execution finished.")
 
 

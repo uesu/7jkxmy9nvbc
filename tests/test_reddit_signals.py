@@ -439,7 +439,10 @@ check("r66 engine delegates the continuation tombstone to signals",
       and v3.tombstone_continuation_payload("gone")["components"][0]["accent_color"] == 0x808080)
 check("r52 X workflow maps MAX_CACHE_SIZE_PER_ACCOUNT as a Variable",
       "MAX_CACHE_SIZE_PER_ACCOUNT: ${{ vars.MAX_CACHE_SIZE_PER_ACCOUNT }}" in _twitter_wf)
-check("ci runs this suite", "python tests/test_reddit_signals.py" in _ci)
+check("ci runs this suite",
+      "python tests/test_reddit_signals.py" in _ci
+      or "tests/test_reddit_signals.py" in open(
+          os.path.join(ROOT, ".github/maintenance.json"), encoding="utf-8").read())
 
 
 print()

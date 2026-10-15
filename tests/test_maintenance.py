@@ -1,533 +1,336 @@
-"""Maintenance policy tests — no network, no secrets, no writes.
-
-Run:  python tests/test_maintenance.py
-
-Every case here runs against a JSON fixture under
-``tests/fixtures/maintenance/``. The merge controller is exercised in its pure
-no-write decision mode; nothing in this suite touches the GitHub API, a
-repository setting, a Discord webhook or runtime cache state.
-
-FIXTURE PROVENANCE (this note replaces a directory README so the fixtures
-directory ships no documentation file of its own):
-
-Every fixture is synthetic or explicitly labelled as reconstructed. No fixture
-contains a captured production response body, a live cache entry, a webhook
-token or any other secret.
-
-  python_manifest_*.json   setup-python release manifests (candidate selection)
-  release_dates_*.json     tag -> ISO release date maps (soak policy)
-  run_report_*.json        monitor run reports (renderer counters/redaction)
-  persistence_*.json       cache save/commit/push records (footer states)
-  merge_*.json             merge-controller decision payloads (no-write mode)
-  crosspost_*.json         sanitized child/original/proxy records for the
-                           2026-10-15 AnantaLeaks_1x6h1mf crosspost incident.
-                           These are SYNTHETIC reconstructions of the identity
-                           and metadata shapes described in the incident, NOT
-                           captured RSS/archive/proxy responses. Do not read
-                           them as evidence of what any real service returned.
-  production_layout.json   the documentation-free production copy manifest
-
-A fixture is only ever a stand-in for a shape. When a test needs the real
-behaviour of production code it imports and calls that code; fixtures supply
-inputs, never expected verdicts.
-"""
+"""Offline maintenance policy tests — no GitHub writes, no posting."""
 from __future__ import annotations
 
 import json
-import os
 import sys
-from datetime import UTC, datetime
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
-
-import maintenance as m  # noqa: E402
-
-FIXTURES = os.path.join(ROOT, "tests", "fixtures", "maintenance")
-
-passes = 0
-failures: list[str] = []
-
-
-def check(name: str, condition: bool) -> None:
-    global passes
-    if condition:
-        passes += 1
-        print(f"PASS {name}")
-    else:
-        failures.append(name)
-        print(f"FAIL {name}")
-        # Hosted job logs are not always retrievable, and a bare non-zero exit
-        # names no cause. Emitting an annotation makes the specific failing
-        # assertion readable through the check-runs API.
-        if os.environ.get("GITHUB_ACTIONS") == "true":
-            print(f"::error title={os.path.basename(__file__)}::{name}")
-
-
-def _annotate_crash(exc_type, exc, tb):
-    """Report an uncaught exception as an annotation, then print it normally.
-
-    A crash produces no check() failure, so without this the only hosted signal
-    is "Process completed with exit code 1" and the traceback sits in a log
-    blob that may not be retrievable. The real cause has to survive the run.
-    """
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        frame = tb
-        while frame is not None and frame.tb_next is not None:
-            frame = frame.tb_next
-        where = ""
-        if frame is not None:
-            where = f" at {os.path.basename(frame.tb_frame.f_code.co_filename)}:{frame.tb_lineno}"
-        print(f"::error title={os.path.basename(__file__)} crashed::"
-              f"{exc_type.__name__}: {exc}{where}")
-    sys.__excepthook__(exc_type, exc, tb)
-
-
-sys.excepthook = _annotate_crash
-
-
-def fixture(name: str):
-    with open(os.path.join(FIXTURES, name), encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-MANIFEST = fixture("python_manifest_candidates.json")
-NOW = datetime(2026, 10, 15, tzinfo=UTC)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 1. numeric version parsing and ordering ---")
-
-check("a complete numeric X.Y.Z parses", m.parse_version("3.14.8") == (3, 14, 8))
-check("3.15.10 sorts AFTER 3.15.9 numerically, not lexically",
-      m.parse_version("3.15.10") > m.parse_version("3.15.9"))
-check("'3.15.10' would sort BEFORE '3.15.9' as a string (the bug being fixed)",
-      "3.15.10" < "3.15.9")
-check("a two-part version is rejected", m.parse_version("3.14") is None)
-check("a prerelease is rejected", m.parse_version("3.16.0rc1") is None)
-check("a 'v' prefix is rejected", m.parse_version("v3.14.8") is None)
-check("a build tag is rejected", m.parse_version("3.14.8+dfsg") is None)
-check("None is rejected", m.parse_version(None) is None)
-check("a non-string is rejected", m.parse_version(3.14) is None)
-check("prerelease detection works", m.is_prerelease("1.2.3rc1") and not m.is_prerelease("1.2.3"))
-check("version_kind: patch", m.version_kind((3, 14, 8), (3, 14, 9)) == "patch")
-check("version_kind: minor", m.version_kind((3, 14, 8), (3, 15, 0)) == "minor")
-check("version_kind: major", m.version_kind((3, 14, 8), (4, 0, 0)) == "major")
-check("version_kind: downgrade", m.version_kind((3, 14, 8), (3, 14, 7)) == "downgrade")
-check("version_kind: same", m.version_kind((3, 14, 8), (3, 14, 8)) == "same")
-check("ISO date parses", m.parse_iso_date("2026-01-05T00:00:00Z") is not None)
-check("a malformed date is None, not a crash", m.parse_iso_date("yesterday") is None)
-check("an absent date is None", m.parse_iso_date(None) is None)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 2. runtime candidate selection ---")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW)
-check("the newest patch in the current series wins",
-      d["status"] == "proposed" and d["candidate"] == "3.14.10" and d["kind"] == "patch")
-check("3.14.10 beats 3.14.9 numerically", d["candidate"] != "3.14.9")
-
-d = m.select_python_candidate("3.14.10", MANIFEST, now=NOW)
-check("no newer patch in series falls through to the next minor",
-      d["kind"] == "minor" or d["status"] in {"deferred", "review-required"})
-
-d = m.select_python_candidate("3.14.10", MANIFEST, now=NOW,
-                              release_dates=fixture("release_dates_missing.json"))
-check("an unavailable release date defers instead of bypassing the soak",
-      d["status"] == "deferred" and d["reason"] == "release-date-unavailable")
-check("release-date-unavailable is distinct from up-to-date", d["status"] != "up-to-date")
-
-d = m.select_python_candidate("3.14.10", MANIFEST, now=NOW,
-                              release_dates=fixture("release_dates_too_young.json"),
-                              soak_days=30)
-check("a too-young minor defers on soak",
-      d["status"] == "deferred" and d["reason"] == "soak")
-
-d = m.select_python_candidate("3.14.10", MANIFEST, now=NOW,
-                              release_dates=fixture("release_dates_satisfied.json"),
-                              soak_days=30)
-check("a soaked minor is review-required, never auto-eligible",
-      d["status"] == "review-required" and d["reason"] == "next-minor")
-
-d = m.select_python_candidate("3.14.10", MANIFEST, now=NOW,
-                              release_dates=fixture("release_dates_too_young.json"),
-                              soak_days=30, ignore_soak=True)
-check("ignore_soak still leaves a minor on the human-review path",
-      d["status"] == "review-required")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, force_version="3.14.9")
-check("a patch override proposes",
-      d["status"] == "proposed" and d["reason"] == "override-patch")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, force_version="3.15.0")
-check("a minor override is review-required, not an auto-eligible patch",
-      d["status"] == "review-required" and d["reason"] == "override-minor")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, force_version="4.0.0")
-check("a major override is review-required", d["reason"] == "override-major")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, force_version="3.14.7")
-check("a downgrade override is review-required", d["reason"] == "override-downgrade")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, force_version="3.14")
-check("a malformed override fails closed",
-      d["status"] == "failed" and d["reason"] == "invalid-override")
-
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, force_version="3.14.8")
-check("an override equal to the current pin is up-to-date",
-      d["status"] == "up-to-date" and d["reason"] == "override-equals-current")
-
-d = m.select_python_candidate("3.14", MANIFEST, now=NOW)
-check("an invalid current pin fails closed",
-      d["status"] == "failed" and d["reason"] == "invalid-current-pin")
-
-d = m.select_python_candidate("3.14.8", {"not": "a list"}, now=NOW)
-check("an unavailable/malformed manifest fails closed",
-      d["status"] == "failed" and d["reason"] == "unavailable-manifest")
-
-d = m.select_python_candidate("3.16.0", MANIFEST, now=NOW)
-check("a series with nothing newer is up-to-date", d["status"] == "up-to-date")
-
-# Architecture and stability filters.
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW)
-check("an arm64-only 3.17.0 is never selected for linux x64",
-      d.get("candidate") != "3.17.0")
-d = m.select_python_candidate("3.15.0", MANIFEST, now=NOW)
-check("a 3.16.0rc1 prerelease is never proposed", d.get("candidate") != "3.16.0rc1")
-check("an entry with no files list is skipped",
-      all(e["version_text"] != "3.14.11"
-          for e in m._manifest_candidates(MANIFEST)))
-check("a malformed version entry is skipped",
-      all(e["version_text"] != "not-a-version"
-          for e in m._manifest_candidates(MANIFEST)))
-d = m.select_python_candidate("3.14.8", MANIFEST, now=NOW, architecture="arm64")
-check("a wrong-architecture query finds nothing usable in this fixture",
-      d["status"] in {"failed", "up-to-date"})
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 3. update risk classification ---")
-
-check("a pip patch inside an approved major is routine",
-      m.classify_update("pip", "3.14.5", "3.14.6")["risk"] == "routine")
-check("a pip minor inside an approved major is routine",
-      m.classify_update("pip", "3.14.5", "3.15.0")["risk"] == "routine")
-check("a pip major is review-required",
-      m.classify_update("pip", "3.14.5", "4.0.0")["risk"] == "review-required")
-check("a pip major downgrade is review-required",
-      m.classify_update("pip", "4.0.0", "3.9.9")["risk"] == "review-required")
-check("a 0.x minor is treated as breaking",
-      m.classify_update("pip", "0.4.0", "0.5.0")["risk"] == "review-required")
-check("a 0.x patch stays routine",
-      m.classify_update("pip", "0.4.0", "0.4.1")["risk"] == "routine")
-check("a prerelease is review-required",
-      m.classify_update("pip", "3.14.5", "3.15.0rc1")["risk"] == "review-required")
-check("an unparseable version is review-required",
-      m.classify_update("pip", "latest", "3.14.5")["risk"] == "review-required")
-check("an unknown ecosystem is review-required",
-      m.classify_update("cargo", "1.0.0", "1.0.1")["risk"] == "review-required")
-
-check("an action patch is routine",
-      m.classify_update("github-actions", "7.0.0", "7.0.1")["risk"] == "routine")
-check("an action major is review-required",
-      m.classify_update("github-actions", "7.0.1", "8.0.0")["risk"] == "review-required")
-check("a changed action source is review-required",
-      m.classify_update("github-actions", "7.0.0", "7.0.1",
-                        source_changed=True)["risk"] == "review-required")
-check("a runtime transition is review-required",
-      m.classify_update("github-actions", "7.0.0", "7.0.1",
-                        runtime_transition=True)["risk"] == "review-required")
-check("a permission/trigger change is review-required even for a patch",
-      m.classify_update("github-actions", "7.0.0", "7.0.1",
-                        permission_or_trigger_changed=True)["risk"] == "review-required")
-
-check("a python patch is routine",
-      m.classify_update("python", "3.14.8", "3.14.9")["risk"] == "routine")
-check("a python minor is review-required",
-      m.classify_update("python", "3.14.8", "3.15.0")["risk"] == "review-required")
-check("a python major is review-required",
-      m.classify_update("python", "3.14.8", "4.0.0")["risk"] == "review-required")
-check("a python downgrade is review-required",
-      m.classify_update("python", "3.14.8", "3.14.7")["risk"] == "review-required")
-
-sec = m.classify_update("pip", "3.14.5", "3.14.6", security=True)
-check("a security update is expedited", sec.get("expedite") is True)
-check("a security update does not become routine-by-security",
-      "security-expedited" in sec["reason"])
-check("a security MAJOR is still review-required",
-      m.classify_update("pip", "3.14.5", "4.0.0", security=True)["risk"] == "review-required")
-
-check("a mixed-major group is controlled by its riskiest member",
-      m.group_risk([{"risk": "routine", "reason": "in-range-routine-update"},
-                    {"risk": "review-required", "reason": "major-bump"}])["risk"]
-      == "review-required")
-check("an all-routine group is routine",
-      m.group_risk([{"risk": "routine", "reason": "in-range-routine-update"}])["risk"]
-      == "routine")
-check("an empty group fails closed",
-      m.group_risk([])["risk"] == "review-required")
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 4. auto-merge variable semantics ---")
-
-check("'yes' enables auto-merge", m.auto_merge_enabled("yes") is True)
-check("'YES' enables auto-merge (case-insensitive)", m.auto_merge_enabled("YES") is True)
-check("unset does not enable auto-merge", m.auto_merge_enabled(None) is False)
-check("empty does not enable auto-merge", m.auto_merge_enabled("") is False)
-check("'true' does not enable auto-merge", m.auto_merge_enabled("true") is False)
-check("'all' is not an escape hatch", m.auto_merge_enabled("all") is False)
-check("an unknown value does not enable auto-merge",
-      m.auto_merge_enabled("maybe") is False)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 5. required-check evaluation ---")
-
-HEAD = "a" * 40
-
-
-def chk(name="maintenance-ci", sha=HEAD, status="completed", conclusion="success",
-        app="github-actions"):
-    return {"name": name, "head_sha": sha, "status": status,
-            "conclusion": conclusion, "app_slug": app}
-
-
-check("a successful required check on the exact head is ready",
-      m.evaluate_required_checks([chk()], ["maintenance-ci"], HEAD)["ready"] is True)
-check("zero checks block",
-      m.evaluate_required_checks([], ["maintenance-ci"], HEAD)["reason"]
-      == "no-checks-on-head")
-check("an unrelated green check is insufficient",
-      m.evaluate_required_checks([chk(name="something-else")],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "missing-required-checks")
-check("a skipped mandatory check is insufficient",
-      m.evaluate_required_checks([chk(conclusion="skipped")],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "skipped-or-neutral-mandatory-check")
-check("a neutral mandatory check is insufficient",
-      m.evaluate_required_checks([chk(conclusion="neutral")],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "skipped-or-neutral-mandatory-check")
-check("a failed mandatory check blocks",
-      m.evaluate_required_checks([chk(conclusion="failure")],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "failed-required-checks")
-check("a pending check blocks",
-      m.evaluate_required_checks([chk(status="in_progress", conclusion=None)],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "checks-pending")
-check("a check with no conclusion blocks",
-      m.evaluate_required_checks([chk(conclusion=None)],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "failed-required-checks")
-check("a stale/foreign head association blocks",
-      m.evaluate_required_checks([chk(sha="b" * 40)],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "no-checks-on-head")
-check("an untrusted check identity blocks",
-      m.evaluate_required_checks([chk(app="third-party")],
-                                 ["maintenance-ci"], HEAD)["reason"]
-      == "untrusted-check-identity")
-check("an empty head SHA blocks",
-      m.evaluate_required_checks([chk()], ["maintenance-ci"], "")["reason"]
-      == "no-head-sha")
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 6. structural diff validation ---")
-
-POLICY = {"allowed_routine_paths": ["requirements.txt", "requirements-dev.txt"],
-          "review_required_paths": [".github/workflows", ".github/scripts",
-                                    "testing area", "tests"]}
-check("a lock-only change is routine",
-      m.validate_update_diff(["requirements.txt"], POLICY)["ok"] is True)
-check("an unexpected path is not routine",
-      m.validate_update_diff(["setup.py"], POLICY)["ok"] is False)
-check("a workflow edit inside a dependency PR is not routine",
-      m.validate_update_diff(["requirements.txt", ".github/workflows/ci.yml"],
-                             POLICY)["ok"] is False)
-check("a sensitive workflow change is not routine even for an allowed path",
-      m.validate_update_diff(["requirements.txt"], POLICY,
-                             sensitive_workflow_change=True)["ok"] is False)
-check("an empty diff is not routine",
-      m.validate_update_diff([], POLICY)["ok"] is False)
-check("a nested review-required path is caught",
-      m.validate_update_diff(["testing area/reddit_main_v3.py"], POLICY)["ok"] is False)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 7. merge controller decisions (no-write mode) ---")
-
-DECISIONS = {
-    "merge_routine_green.json": "merge",
-    "merge_python_patch_green.json": "merge",
-    "merge_skipped_mandatory_check.json": "block",
-    "merge_neutral_mandatory_check.json": "block",
-    "merge_zero_checks.json": "block",
-    "merge_unrelated_green_check.json": "block",
-    "merge_stale_head.json": "block",
-    "merge_pending_check.json": "block",
-    "merge_untrusted_check_app.json": "block",
-    "merge_legacy_status_failure.json": "block",
-    "merge_maintainer_hold.json": "block",
-    "merge_changes_requested.json": "block",
-    "merge_draft.json": "block",
-    "merge_auto_merge_unset.json": "hold",
-    "merge_auto_merge_all.json": "hold",
-    "merge_mixed_major_group.json": "block",
-    "merge_source_changed.json": "block",
-    "merge_diff_not_routine.json": "block",
-    "merge_mergeability_unknown.json": "block",
-    "merge_dirty.json": "block",
-    "merge_open_advisory.json": "block",
-    "merge_unavailable_scan.json": "block",
-    "merge_branch_name_only_not_author.json": "block",
-    "merge_cross_fork.json": "block",
-    "merge_python_minor_green.json": "block",
-}
-
-for name, expected in DECISIONS.items():
-    decision = m.decide_merge(fixture(name))
-    check(f"{name} -> {expected} ({decision['reason'][:60]})",
-          decision["action"] == expected)
-
-green = m.decide_merge(fixture("merge_routine_green.json"))
-check("a merge decision names the head SHA it validated",
-      green["head_sha"] == "a" * 40)
-check("a merge decision names a reviewed merge method",
-      green["merge_method"] in ("squash", "merge"))
-check("a merge decision never invents a merged result",
-      "merged" not in green)
-check("a blocking decision lists every reason",
-      len(m.decide_merge(fixture("merge_maintainer_hold.json"))["detail"]) >= 1)
-
-missing = dict(fixture("merge_routine_green.json"))
-missing["diff"] = None
-check("a missing diff blocks instead of falling back to a real write",
-      m.decide_merge(missing)["action"] == "block")
-empty = {"policy": fixture("merge_policy.json"), "repository": "uesu/7jkxmy9nvbc",
-         "auto_merge_variable": "yes", "pr": {}}
-check("an almost-empty payload fails closed",
-      m.decide_merge(empty)["action"] == "block")
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 8. locks, digests and the production-copy manifest ---")
-
-def _text(*parts: str) -> str:
-    with open(os.path.join(ROOT, *parts), encoding="utf-8") as handle:
-        return handle.read()
-
-
-LOCK = _text("requirements.txt")
-check("the runtime lock is hash-pinned", "--hash=sha256:" in LOCK)
-check("the runtime lock carries the canonical compiler header",
-      m.normalize_lock_text(LOCK) == LOCK)
-check("normalizing a compiler-interpreter header is stable",
-      m.normalize_lock_text(
-          "# This file is autogenerated by pip-compile with Python 3.11\nx==1\n"
-      ).startswith("# This file is autogenerated by pip-compile with pip-tools"))
-check("a lock digest ignores the nondeterministic compiler line",
-      m.lock_digest("# This file is autogenerated by pip-compile with Python 3.11\nx==1\n")
-      == m.lock_digest("# This file is autogenerated by pip-compile with Python 3.14\nx==1\n"))
-check("a lock digest changes when package content changes",
-      m.lock_digest("x==1\n") != m.lock_digest("x==2\n"))
-
-profile = json.loads(_text(".github", "maintenance.json"))
-entries = m.manifest_entries(profile["copy_manifest"]["include"], ROOT,
-                             exclude_globs=profile["copy_manifest"]["exclude_globs"])
-missing = sorted(p for p, d in entries.items() if d == "MISSING")
-check(f"every file in the production-copy manifest exists ({missing or 'none missing'})",
-      not missing)
-check("the manifest is deterministic across runs",
-      m.manifest_fingerprint(entries)
-      == m.manifest_fingerprint(dict(reversed(list(entries.items())))))
-check("the manifest never contains runtime state",
-      not any(os.path.basename(item).endswith(".json") and "/" not in item
-              for item in entries))
-check("the manifest never contains development Markdown",
-      not any(item.startswith("docs/") or item in {"README.md", "AGENTS.md"}
-              for item in entries))
-check("the manifest never contains a one-off diagnostic workflow",
-      not any("maintenance_review" in item or "probe" in item for item in entries))
-check("state files are listed as never-touch",
-      set(profile["copy_manifest"]["never_touch"])
-      >= {"posted_reddit.json", "posted_tweets.json", "pending_reddit.json",
-          "proxy_health.json"})
-check("the removed auto-merge workflow is gone",
-      not os.path.exists(os.path.join(ROOT, ".github", "workflows",
-                                      "dependabot_auto_merge.yml")))
-check("exactly one merge controller exists",
-      os.path.exists(os.path.join(ROOT, ".github", "workflows",
-                                  "maintenance_merge.yml")))
-check("the final gate has the stable name maintenance-ci",
-      profile["checks"]["final_gate"] == "maintenance-ci")
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 9. redaction ---")
-
-check("a webhook token is redacted",
-      "[REDACTED]" in m.redact("https://discord.com/api/webhooks/123/abcDEF-token"))
-check("a query token is redacted",
-      "[REDACTED]" in m.redact("https://x.example/a?token=super-secret"))
-check("an Authorization header is redacted",
-      "[REDACTED]" in m.redact("Authorization: Bearer ghp_" + "A" * 32))
-check("a cookie value is redacted", "[REDACTED]" in m.redact("cookie: session=abc123"))
-check("a JWT-looking token is redacted",
-      "[REDACTED]" in m.redact("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123def456"))
-check("benign text is untouched",
-      m.redact("posting AnantaLeaks_1x6h1mf as an image") ==
-      "posting AnantaLeaks_1x6h1mf as an image")
-
-blob = m.redact_mapping({"env": {"A": "b"}, "token": "x", "note": "ok",
-                         "webhook_url": "https://discord.com/api/webhooks/1/SECRET"})
-check("a catch-all env blob is dropped, not serialized",
-      blob["env"] == "[REDACTED-CATCH-ALL]")
-check("a token field is redacted by name", blob["token"] == "[REDACTED]")
-check("a webhook URL field is redacted by name", blob["webhook_url"] == "[REDACTED]")
-check("benign fields survive", blob["note"] == "ok")
-check("nested structures are redacted",
-      m.redact_mapping({"a": [{"token": "secret"}]})["a"][0]["token"] == "[REDACTED]")
-check("a deeply nested structure is truncated, not exploded",
-      m.redact_mapping({"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": 1}}}}}}}}},
-                       max_depth=3) is not None)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 10. shared-contract drift guard ---")
-
-REQUIRED_HELPERS = ("maintenance.py", "ci.py", "python_version_bump.py",
-                    "render_run_summary.py", "merge_monitor_caches.py")
-for helper in REQUIRED_HELPERS:
-    check(f"shared helper present: .github/scripts/{helper}",
-          os.path.isfile(os.path.join(ROOT, ".github", "scripts", helper)))
-
-source = _text(".github", "scripts", "maintenance.py")
-check("maintenance.py declares the shared contract", m.CONTRACT in source)
-check("maintenance.py makes no network call",
-      not any(token in source for token in ("urllib.request", "requests.get",
-                                            "aiohttp", "socket.")))
-check("maintenance.py performs no subprocess execution", "subprocess" not in source)
-check("decide_merge is pure (returns a decision, never merges)",
-      "def decide_merge" in source and "pulls/merge" not in source)
-check("the proposer never self-merges",
-      profile["python_updates"]["proposer_self_merge"] is False)
-check("both profiles share the same application and maintenance suites",
-      profile["profiles"]["development"]["tests"] == profile["profiles"]["production"]["tests"])
-check("the production profile ships no optional docs",
-      profile["profiles"]["production"]["optional_docs"] == [])
-check("the production profile requires no optional checks",
-      profile["profiles"]["production"]["optional_checks"] == [])
-check("the development profile does ship optional docs",
-      len(profile["profiles"]["development"]["optional_docs"]) > 0)
-
-
-print()
-if failures:
-    print(f"MAINTENANCE TEST FAILURES ({len(failures)}): {failures}")
-    sys.exit(1)
-print(f"MAINTENANCE TEST: ALL PASS ({passes} pass)")
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / ".github" / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import maintenance  # noqa: E402
+import python_version_bump  # noqa: E402
+
+SHA = "a" * 40
+SHA2 = "b" * 40
+
+
+def _pr(*, login="dependabot[bot]", sha=SHA, ref="dependabot/pip/foo", draft=False,
+        labels=None, mergeable=True, mergeable_state="clean", base="main"):
+    return {
+        "number": 12,
+        "state": "open",
+        "draft": draft,
+        "html_url": "https://example.test/pr/12",
+        "mergeable": mergeable,
+        "mergeable_state": mergeable_state,
+        "user": {"login": login},
+        "head": {"sha": sha, "ref": ref},
+        "base": {"ref": base},
+        "labels": labels or [],
+    }
+
+
+def _snapshot(**overrides):
+    data = {
+        "repository": "uesu/News-Express",
+        "head_sha": SHA,
+        "pull_request": _pr(),
+        "checks": [{
+            "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+            "conclusion": "success", "app": {"slug": "github-actions"},
+        }],
+        "files": [{"filename": "requirements.txt", "patch": "-aiohttp==3.14.4\n+aiohttp==3.14.5\n"}],
+        "reviews": [],
+        "legacy_statuses": [],
+        "risk": {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"},
+        "variables": {"AUTO_MERGE_DEPENDABOT": "yes", "AUTO_MERGE_PYTHON_BUMP": "yes"},
+        "policy": {
+            "repository": "uesu/News-Express",
+            "default_branch": "main",
+            "mandatory_check_names": ["application"],
+            "human_review_labels": ["review-required", "do-not-merge", "hold"],
+            "updater_identities": {
+                "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
+                "python_bump": {
+                    "login": "github-actions[bot]",
+                    "auto_merge_var": "AUTO_MERGE_PYTHON_BUMP",
+                    "branch_prefix": "chore/python-",
+                    "allowed_files": [".python-version"],
+                },
+            },
+            "allowed_merge_method": "squash",
+        },
+    }
+    data.update(overrides)
+    return data
+
+
+class VersionAndSelectTests(unittest.TestCase):
+    def test_patch_is_auto_eligible(self):
+        current = maintenance.parse_version("3.14.8")
+        manifest = [{
+            "version": "3.14.9",
+            "stable": True,
+            "release_url": "https://example.test/3.14.9",
+            "files": [{"platform": "linux", "arch": "x64"}],
+        }]
+        result = maintenance.select_python_candidate(current, manifest)
+        self.assertEqual(result["status"], "proposed")
+        self.assertEqual(result["kind"], "patch")
+        self.assertTrue(result["auto_eligible"])
+
+    def test_next_minor_needs_review_after_soak(self):
+        current = maintenance.parse_version("3.14.8")
+        manifest = [{
+            "version": "3.15.0",
+            "stable": True,
+            "release_date": "2026-01-01T00:00:00Z",
+            "files": [{"platform": "linux", "arch": "x64"}],
+        }]
+        result = maintenance.select_python_candidate(
+            current, manifest, soak_days=30,
+            now=maintenance.parse_iso_date("2026-03-01T00:00:00Z"),
+        )
+        self.assertEqual(result["status"], "review-required")
+        self.assertEqual(result["kind"], "minor")
+        self.assertFalse(result["auto_eligible"])
+
+    def test_minor_inside_soak_is_deferred(self):
+        current = maintenance.parse_version("3.14.8")
+        manifest = [{
+            "version": "3.15.0",
+            "stable": True,
+            "release_date": "2026-09-20T00:00:00Z",
+            "files": [{"platform": "linux", "arch": "x64"}],
+        }]
+        result = maintenance.select_python_candidate(
+            current, manifest, soak_days=30,
+            now=maintenance.parse_iso_date("2026-09-25T00:00:00Z"),
+        )
+        self.assertEqual(result["status"], "deferred")
+        self.assertIn("soak", result["reason"])
+
+    def test_skip_minor_and_major_are_not_auto(self):
+        current = maintenance.parse_version("3.14.8")
+        forced = maintenance.select_python_candidate(current, [], force="3.16.0")
+        self.assertEqual(forced["status"], "review-required")
+        major = maintenance.select_python_candidate(current, [], force="4.0.0")
+        self.assertEqual(major["status"], "review-required")
+        self.assertFalse(major["auto_eligible"])
+
+    def test_prerelease_manifest_entries_are_ignored(self):
+        current = maintenance.parse_version("3.14.8")
+        manifest = [{
+            "version": "3.14.9rc1",
+            "stable": True,
+            "files": [{"platform": "linux", "arch": "x64"}],
+        }]
+        result = maintenance.select_python_candidate(current, manifest)
+        self.assertEqual(result["status"], "up-to-date")
+
+    def test_package_and_action_classification(self):
+        self.assertEqual(maintenance.classify_package_update("1.2.3", "1.2.4")["risk"], "routine")
+        self.assertEqual(maintenance.classify_package_update("1.2.3", "2.0.0")["risk"], "review-required")
+        self.assertEqual(maintenance.classify_package_update("0.4.0", "0.5.0")["risk"], "review-required")
+        self.assertEqual(
+            maintenance.classify_action_update(SHA, SHA2, old_action="actions/checkout",
+                                               new_action="actions/checkout",
+                                               comment_old="v7", comment_new="v7")["risk"],
+            "routine",
+        )
+        self.assertEqual(
+            maintenance.classify_action_update(SHA, SHA2, old_action="actions/checkout",
+                                               new_action="actions/checkout",
+                                               comment_old="v7", comment_new="v8")["risk"],
+            "review-required",
+        )
+        grouped = maintenance.highest_risk([
+            {"risk": "routine", "auto_eligible": True},
+            {"risk": "review-required", "auto_eligible": False},
+        ])
+        self.assertEqual(grouped["risk"], "review-required")
+        self.assertFalse(grouped["auto_eligible"])
+
+
+class CheckClassificationTests(unittest.TestCase):
+    def test_zero_checks_fail(self):
+        result = maintenance.classify_checks(
+            [], expected_names=["application"], head_sha=SHA)
+        self.assertEqual(result["state"], "failed")
+
+    def test_skipped_neutral_cancelled_do_not_count(self):
+        for conclusion in ("skipped", "neutral", "cancelled", "failure"):
+            result = maintenance.classify_checks(
+                [{"id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+                  "conclusion": conclusion, "app": {"slug": "github-actions"}}],
+                expected_names=["application"], head_sha=SHA)
+            self.assertEqual(result["state"], "failed", conclusion)
+
+    def test_pending_stays_pending(self):
+        result = maintenance.classify_checks(
+            [{"id": 1, "name": "application", "head_sha": SHA, "status": "in_progress",
+              "app": {"slug": "github-actions"}}],
+            expected_names=["application"], head_sha=SHA)
+        self.assertEqual(result["state"], "pending")
+
+    def test_unrelated_and_foreign_ignored_or_rejected(self):
+        result = maintenance.classify_checks(
+            [{"id": 1, "name": "unrelated", "head_sha": SHA, "status": "completed",
+              "conclusion": "success", "app": {"slug": "github-actions"}}],
+            expected_names=["application"], head_sha=SHA)
+        self.assertEqual(result["state"], "failed")
+        foreign = maintenance.classify_checks(
+            [{"id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+              "conclusion": "success", "app": {"slug": "not-github"}}],
+            expected_names=["application"], head_sha=SHA)
+        self.assertEqual(foreign["state"], "failed")
+        self.assertIn("untrusted-app", foreign["reason"])
+
+    def test_stale_sha_is_ignored(self):
+        result = maintenance.classify_checks(
+            [{"id": 1, "name": "application", "head_sha": SHA2, "status": "completed",
+              "conclusion": "success", "app": {"slug": "github-actions"}}],
+            expected_names=["application"], head_sha=SHA)
+        self.assertEqual(result["state"], "failed")
+
+    def test_latest_id_wins(self):
+        result = maintenance.classify_checks(
+            [
+                {"id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+                 "conclusion": "failure", "app": {"slug": "github-actions"}},
+                {"id": 9, "name": "application", "head_sha": SHA, "status": "completed",
+                 "conclusion": "success", "app": {"slug": "github-actions"}},
+            ],
+            expected_names=["application"], head_sha=SHA)
+        self.assertEqual(result["state"], "ready")
+
+
+class MergeDecisionTests(unittest.TestCase):
+    def test_happy_path_merges(self):
+        decision = maintenance.decide_merge(_snapshot())
+        self.assertEqual(decision.action, "merge")
+        self.assertEqual(decision.merge_method, "squash")
+
+    def test_missing_field_fails_closed(self):
+        snap = _snapshot()
+        del snap["checks"]
+        decision = maintenance.decide_merge(snap)
+        self.assertEqual(decision.action, "fail")
+        self.assertIn("missing-field", decision.reason)
+
+    def test_hold_label_and_changes_requested(self):
+        hold = maintenance.decide_merge(_snapshot(pull_request=_pr(labels=[{"name": "hold"}])))
+        self.assertEqual(hold.action, "defer")
+        changes = maintenance.decide_merge(_snapshot(reviews=[{"state": "CHANGES_REQUESTED"}]))
+        self.assertEqual(changes.action, "defer")
+
+    def test_untrusted_updater_and_head_change(self):
+        human = maintenance.decide_merge(_snapshot(pull_request=_pr(login="alice")))
+        self.assertEqual(human.action, "defer")
+        moved = maintenance.decide_merge(_snapshot(head_sha=SHA2))
+        self.assertEqual(moved.action, "fail")
+
+    def test_auto_merge_flag_must_be_exact_yes(self):
+        for value in ("Yes", "true", "1", "on", ""):
+            decision = maintenance.decide_merge(_snapshot(variables={"AUTO_MERGE_DEPENDABOT": value}))
+            self.assertEqual(decision.action, "defer", value)
+
+    def test_python_bump_rejects_extra_paths(self):
+        pr = _pr(login="github-actions[bot]", ref="chore/python-3.14.9")
+        snap = _snapshot(
+            pull_request=pr,
+            files=[{"filename": ".python-version", "patch": "-3.14.8\n+3.14.9\n"},
+                   {"filename": "README.md", "patch": "+x\n"}],
+            variables={"AUTO_MERGE_PYTHON_BUMP": "yes"},
+            risk={"risk": "routine", "auto_eligible": True},
+        )
+        decision = maintenance.decide_merge(snap)
+        self.assertEqual(decision.action, "review-required")
+
+    def test_workflow_policy_change_is_not_routine(self):
+        files = [{
+            "filename": ".github/workflows/ci.yml",
+            "patch": "+      timeout-minutes: 99\n",
+        }]
+        snap = _snapshot(files=files)
+        decision = maintenance.decide_merge(snap)
+        self.assertNotEqual(decision.action, "merge")
+
+    def test_fixture_cli_refuses_live_fallback(self):
+        with self.assertRaises(SystemExit):
+            maintenance.main(["decide"])
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "snap.json"
+            fixture.write_text("{}\n", encoding="utf-8")
+            self.assertEqual(maintenance.main(["decide", "--fixture", str(fixture)]), 1)
+            self.assertEqual(
+                maintenance.main(["decide", "--fixture", str(fixture), "--apply"]), 2)
+
+
+class PythonBumpAdapterTests(unittest.TestCase):
+    def test_write_pin_rewrites_only_the_pin_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pin = root / ".python-version"
+            pin.write_text("3.14.8\n", encoding="utf-8")
+            extra = root / "README.md"
+            extra.write_text("stay\n", encoding="utf-8")
+            profile = ROOT / ".github" / "maintenance.json"
+            code = python_version_bump.main([
+                "--write-pin", "--candidate", "3.14.9",
+                "--root", str(root), "--profile", str(profile),
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(pin.read_text(encoding="utf-8"), "3.14.9\n")
+            self.assertEqual(extra.read_text(encoding="utf-8"), "stay\n")
+
+    def test_missing_docs_are_ok_for_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".python-version").write_text("3.14.8\n", encoding="utf-8")
+            fixture = Path(tmp) / "fix.json"
+            fixture.write_text(json.dumps({
+                "current": "3.14.8",
+                "manifest": [{
+                    "version": "3.14.8",
+                    "stable": True,
+                    "files": [{"platform": "linux", "arch": "x64"}],
+                }],
+            }), encoding="utf-8")
+            code = python_version_bump.main([
+                "--fixture", str(fixture),
+                "--root", str(root),
+                "--profile", str(ROOT / ".github" / "maintenance.json"),
+            ])
+            self.assertEqual(code, 0)
+
+    def test_live_without_fixture_or_manifest_refuses(self):
+        self.assertEqual(python_version_bump.main([]), 2)
+
+
+class CiRegistryTests(unittest.TestCase):
+    def test_unregistered_test_file_is_rejected(self):
+        import ci as ci_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tests = root / "tests"
+            tests.mkdir()
+            (tests / "test_orphan.py").write_text("print(1)\n", encoding="utf-8")
+            profile = {"test_commands": {"application": [["python", "tests/test_smoke.py"]]}}
+            with self.assertRaises(SystemExit) as caught:
+                ci_mod.ensure_all_tests_registered(root, profile)
+            self.assertIn("unregistered", str(caught.exception))
+
+    def test_final_gate_fail_closed(self):
+        import ci as ci_mod
+        self.assertEqual(ci_mod.final_gate({"application": 0, "maintenance": 1}), 1)
+        self.assertEqual(ci_mod.final_gate({"application": 0, "maintenance": 0}), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

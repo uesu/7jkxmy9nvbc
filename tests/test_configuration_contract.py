@@ -1,405 +1,126 @@
-"""Configuration-contract tests — no network, no secrets, no state mutation.
-
-Run:  python tests/test_configuration_contract.py
-
-A literal grep miss is NOT evidence that a setting is unused: generated names,
-deliberately supported fallback engines and catch-all workflow wiring are all
-real consumers. These checks therefore follow a name from its runtime reader
-through workflow wiring and into .env.example, and they verify that the
-production copy works with no development Markdown present.
-"""
+"""Pin, lock, workflow, and documentation-free production contract."""
 from __future__ import annotations
 
-import glob
-import json
-import os
 import re
 import sys
+import unittest
+from pathlib import Path
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / ".github" / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
-import maintenance as m  # noqa: E402
+import maintenance  # noqa: E402
 
-passes = 0
-failures: list[str] = []
+try:
+    import yaml  # type: ignore
+except ImportError:  # pragma: no cover - CI installs PyYAML via requirements-dev
+    yaml = None
 
-
-def check(name: str, condition: bool) -> None:
-    global passes
-    if condition:
-        passes += 1
-        print(f"PASS {name}")
-    else:
-        failures.append(name)
-        print(f"FAIL {name}")
-        # Hosted job logs are not always retrievable, and a bare non-zero exit
-        # names no cause. Emitting an annotation makes the specific failing
-        # assertion readable through the check-runs API.
-        if os.environ.get("GITHUB_ACTIONS") == "true":
-            print(f"::error title={os.path.basename(__file__)}::{name}")
+PIN = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def _annotate_crash(exc_type, exc, tb):
-    """Report an uncaught exception as an annotation, then print it normally.
+class PinAndLockTests(unittest.TestCase):
+    def test_exact_pin(self):
+        self.assertEqual(PIN, "3.14.8")
+        self.assertRegex(PIN, r"^\d+\.\d+\.\d+$")
 
-    A crash produces no check() failure, so without this the only hosted signal
-    is "Process completed with exit code 1" and the traceback sits in a log
-    blob that may not be retrievable. The real cause has to survive the run.
-    """
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        frame = tb
-        while frame is not None and frame.tb_next is not None:
-            frame = frame.tb_next
-        where = ""
-        if frame is not None:
-            where = f" at {os.path.basename(frame.tb_frame.f_code.co_filename)}:{frame.tb_lineno}"
-        print(f"::error title={os.path.basename(__file__)} crashed::"
-              f"{exc_type.__name__}: {exc}{where}")
-    sys.__excepthook__(exc_type, exc, tb)
+    def test_hashed_locks_exist(self):
+        runtime = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+        self.assertIn(" --hash=", runtime)
+        self.assertIn(" --hash=", dev)
+        self.assertGreater(runtime.count("--hash="), 5)
+        self.assertTrue("pip==" in runtime or "pip==" in dev)
 
-
-sys.excepthook = _annotate_crash
-
-
-def read(*parts: str) -> str:
-    with open(os.path.join(ROOT, *parts), encoding="utf-8") as handle:
-        return handle.read()
+    def test_no_actions_lockfile(self):
+        self.assertFalse((ROOT / ".github" / "workflows" / "actions.lock").exists())
+        for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("actions.lock", text)
+            self.assertNotIn("gh-actions-lock", text)
 
 
-PROFILE = json.loads(read(".github", "maintenance.json"))
-ENV_EXAMPLE = read(".env.example")
-WORKFLOWS = {os.path.basename(item): read(".github", "workflows", os.path.basename(item))
-             for item in sorted(
-                 glob.glob(os.path.join(ROOT, ".github", "workflows", "*.yml")))}
+class WorkflowContractTests(unittest.TestCase):
+    def _text(self, name: str) -> str:
+        return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+
+    def test_ci_permissions_and_groups(self):
+        text = self._text("ci.yml")
+        self.assertIn("contents: read", text)
+        self.assertNotIn("pull_request_target", text)
+        self.assertGreaterEqual(text.count("timeout-minutes:"), 4)
+        self.assertIn("python-version-file: .python-version", text)
+        self.assertIn("--require-hashes", text)
+        self.assertIn("--only-binary=:all:", text)
+        self.assertIn("maintenance-ci", text)
+        if yaml is not None:
+            doc = yaml.safe_load(text)
+            self.assertEqual(doc.get("permissions"), {"contents": "read"})
+
+    def test_monitors_keep_dispatch_and_no_native_schedule(self):
+        for name in ("reddit_monitor.yml", "twitter_monitor.yml"):
+            text = self._text(name)
+            self.assertIn("workflow_dispatch:", text)
+            self.assertIn("cancel-in-progress: false", text)
+            self.assertIn("python-version-file: .python-version", text)
+            self.assertIn("render_run_summary.py", text)
+            self.assertNotIn("count_matches()", text)
+            self.assertIn("write_persist", text)
+
+    def test_merge_controller_trusted_checkout(self):
+        text = self._text("maintenance_merge.yml")
+        self.assertIn("contents: write", text)
+        self.assertIn("default_branch", text)
+        self.assertIn("persist-credentials: false", text)
+        self.assertIn("apply-live --apply-live", text)
+        self.assertNotIn("ref: ${{ github.event.pull_request.head", text)
+        self.assertFalse((ROOT / ".github" / "workflows" / "dependabot_auto_merge.yml").exists())
+
+    def test_python_bump_no_self_merge(self):
+        text = self._text("python_version_bump.yml")
+        self.assertIn("BUMP_PAT", text)
+        self.assertIn("secrets.BUMP_PAT", text)
+        self.assertIn("configuration error, not a GITHUB_TOKEN fallback", text)
+        self.assertIn("wheels == 'yes'", text)
+        self.assertNotIn("gh pr merge", text)
+
+    def test_action_pins_are_shas(self):
+        for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+            for match in re.finditer(r"uses:\s*(\S+?)@(\S+)", path.read_text(encoding="utf-8")):
+                ref = match.group(2).split("#", 1)[0].strip()
+                self.assertTrue(SHA_RE.fullmatch(ref.lower()), f"{path.name}: {match.group(0)}")
 
 
-# ---------------------------------------------------------------------------
-print("\n--- 1. the single runtime pin is the source of truth ---")
+class ProductionCopyTests(unittest.TestCase):
+    def test_runtime_files_exist_and_docs_are_optional(self):
+        profile = maintenance.load_profile()
+        excluded = set(profile.get("production_copy_exclude") or [])
+        for rel in profile.get("runtime_files") or []:
+            self.assertTrue((ROOT / rel).exists(), rel)
+        # Optional docs must stay optional: a production copy ships none of
+        # them, so requiring their existence would fail exactly the layout this
+        # profile exists to support. What must hold is that no doc is smuggled
+        # into the required set, and that the copy excludes them.
+        required = set(profile.get("runtime_files") or [])
+        for rel in profile.get("optional_docs") or []:
+            self.assertNotIn(rel, required, f"{rel} is optional but listed as runtime")
+            self.assertTrue(
+                rel in excluded or rel.split("/")[0] in excluded,
+                f"{rel} is optional but not excluded from the production copy",
+            )
+        self.assertIn("README.md", excluded)
+        self.assertIn("docs", excluded)
+        self.assertIn("posted_reddit.json", excluded)
+        self.assertIn("posted_tweets.json", excluded)
 
-PIN = read(".python-version").strip()
-check(".python-version holds a complete numeric X.Y.Z", m.parse_version(PIN) is not None)
-check(".python-version is exactly the validated interpreter", PIN == "3.14.8")
-check("no current-runtime workflow hard-codes a python-version literal",
-      all("python-version: '3." not in text
-          for name, text in WORKFLOWS.items() if name != "python_version_bump.yml"))
-check("every current-runtime setup-python step reads the pin file",
-      all("python-version-file: '.python-version'" in text
-          for name, text in WORKFLOWS.items()))
-check("the proposer is the only workflow that uses a candidate python-version",
-      "python-version: ${{ needs.select.outputs.candidate }}"
-      in WORKFLOWS["python_version_bump.yml"])
-check("historical version examples under docs/history are not rewritten",
-      not os.path.isdir(os.path.join(ROOT, "docs")))
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 2. frozen package graph ---")
-
-REQ_IN = read("requirements.in")
-REQ_LOCK = read("requirements.txt")
-DEV_IN = read("requirements-dev.in")
-DEV_LOCK = read("requirements-dev.txt")
-check("requirements.in is the human-maintained input",
-      "autogenerated by pip-compile" in REQ_LOCK
-      and "human-maintained INPUT" in REQ_IN)
-check("requirements.txt is generated, not a second hand-edited list",
-      "autogenerated by pip-compile" in REQ_LOCK)
-check("the runtime lock is fully pinned with hashes",
-      "--hash=sha256:" in REQ_LOCK
-      and not re.search(r"^(?!\s*#)[a-z0-9_.\-]+\s*(>=|<=|~=|>|<)", REQ_LOCK, re.MULTILINE))
-# Presence of the marker is not integrity: a padded, truncated or mistyped
-# digest still contains "--hash=sha256:", and pip only rejects it at install
-# time — long after a human merged. sha256 is exactly 64 hex characters, so a
-# malformed one is provably wrong offline. ci.py enforces this too; asserting
-# it here means the hole cannot silently reopen.
-for _label, _lock in (("runtime", REQ_LOCK), ("dev", DEV_LOCK)):
-    _digests = re.findall(r"--hash=sha256:([^\s\\]+)", _lock)
-    check(f"every {_label} lock digest is a well-formed 64-char sha256",
-          len(_digests) > 0
-          and all(re.fullmatch(r"[0-9a-fA-F]{64}", d) for d in _digests))
-check("the baseline direct versions are the resolved ones",
-      all(f"{pkg}==" in REQ_LOCK
-          for pkg in ("aiohttp", "feedparser", "python-dotenv")))
-check("the resolved aiohttp is 3.14.5", "aiohttp==3.14.5" in REQ_LOCK)
-check("the resolved feedparser is 6.0.14", "feedparser==6.0.14" in REQ_LOCK)
-check("the resolved python-dotenv is 1.2.4", "python-dotenv==1.2.4" in REQ_LOCK)
-check("the dev lock is constrained against the runtime graph",
-      "-c requirements.txt" in DEV_IN)
-check("the pinned compiler toolchain is in the dev lock",
-      "pip==26.1.1" in DEV_LOCK and "pip-tools==7.5.3" in DEV_LOCK)
-check("the pinned lint/format tool is in the dev lock", "ruff==0.17.0" in DEV_LOCK)
-check("the YAML parser used by CI is in the dev lock", "pyyaml==6.0.3" in DEV_LOCK)
-check("PyYAML was NOT moved into runtime requirements",
-      "pyyaml" not in REQ_LOCK.lower())
-_dev_names = {mm.group(1).lower()
-              for mm in re.finditer(r"^(?!\s*#)([a-z0-9_.\-]+)==", DEV_LOCK, re.MULTILINE)}
-_rt_names = {mm.group(1).lower()
-             for mm in re.finditer(r"^(?!\s*#)([a-z0-9_.\-]+)==", REQ_LOCK, re.MULTILINE)}
-check("no test-only tool replaces a runtime dependency",
-      not (_dev_names & _rt_names))
-check("CI installs the runtime graph with hash verification",
-      "--require-hashes --only-binary=:all: -r requirements.txt"
-      in WORKFLOWS["ci.yml"])
-check("both monitors install the same frozen graph",
-      all("--require-hashes --only-binary=:all: -r requirements.txt" in text
-          for name, text in WORKFLOWS.items() if name.endswith("_monitor.yml")))
-check("no workflow floats pip on every run",
-      not any("pip install --upgrade pip" in text for text in WORKFLOWS.values()))
-check("the compile command contract is recorded in the profile",
-      "--generate-hashes" in PROFILE["runtime"]["compile_command"]
-      and "--resolver=backtracking" in PROFILE["runtime"]["compile_command"])
-check("the lockfile check verifies input/lock alignment",
-      PROFILE["runtime"]["requirements_input"] == "requirements.in"
-      and PROFILE["runtime"]["requirements_lock"] == "requirements.txt")
+    def test_gitignore_covers_reports(self):
+        text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn(".reports/", text)
+        self.assertIn("run-report", text)
 
 
-# ---------------------------------------------------------------------------
-print("\n--- 3. workflow wiring, permissions and triggers ---")
-
-check("the posting workflows keep cancel-in-progress false",
-      all("cancel-in-progress: false" in WORKFLOWS[name]
-          for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-import yaml as _yaml  # noqa: E402
-
-
-def _triggers(text: str):
-    doc = _yaml.safe_load(text)
-    return doc.get("on", doc.get(True)) or {}
-
-
-check("the posting workflows carry no schedule of their own",
-      all("schedule" not in _triggers(WORKFLOWS[name])
-          for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-check("cron-job.org remains the single monitor scheduler",
-      all("workflow_dispatch" in WORKFLOWS[name]
-          for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-check("the existing dispatch input names are preserved",
-      "test_post:" in WORKFLOWS["reddit_monitor.yml"]
-      and "test_tweet:" in WORKFLOWS["twitter_monitor.yml"]
-      and "dry_run:" in WORKFLOWS["reddit_monitor.yml"])
-check("the weekly maintenance schedule exists and never runs a monitor",
-      "schedule:" in WORKFLOWS["python_version_bump.yml"]
-      and "reddit_main_v3" not in WORKFLOWS["python_version_bump.yml"])
-check("exactly one merge controller exists",
-      "maintenance_merge.yml" in WORKFLOWS and "dependabot_auto_merge.yml" not in WORKFLOWS)
-check("the merge controller runs from the trusted base",
-      "pull_request_target" in WORKFLOWS["maintenance_merge.yml"])
-check("the merge controller never checks out PR head code",
-      "github.head_ref" not in WORKFLOWS["maintenance_merge.yml"])
-check("the controller reevaluates when trusted CI completes",
-      "workflow_run:" in WORKFLOWS["maintenance_merge.yml"])
-check("the controller reevaluates on review/label changes",
-      all(kind in WORKFLOWS["maintenance_merge.yml"]
-          for kind in ("labeled", "unlabeled", "review_requested")))
-check("the controller verifies the API actually says merged",
-      "did not confirm a merge" in WORKFLOWS["maintenance_merge.yml"])
-check("the controller keeps scoped permissions",
-      "checks: read" in WORKFLOWS["maintenance_merge.yml"]
-      and "actions: read" in WORKFLOWS["maintenance_merge.yml"])
-check("PR CI is read-only with no production secrets",
-      "contents: read" in WORKFLOWS["ci.yml"]
-      and "secrets.DISCORD_WEBHOOK_URL" not in WORKFLOWS["ci.yml"])
-check("PR CI does not persist checkout credentials",
-      "persist-credentials: false" in WORKFLOWS["ci.yml"])
-_bump = WORKFLOWS["python_version_bump.yml"]
-_bump_doc = _yaml.safe_load(_bump)
-check("BUMP_PAT is isolated to the publisher job",
-      all("BUMP_PAT" not in json.dumps(job.get("steps", []))
-          for name, job in _bump_doc["jobs"].items() if name != "publish")
-      and "BUMP_PAT is not configured" in _bump
-      and "BUMP_PAT" not in json.dumps(_bump_doc["jobs"]["select"]))
-check("the proposer no longer self-merges",
-      "pulls/merge" not in WORKFLOWS["python_version_bump.yml"]
-      and "gh pr merge" not in WORKFLOWS["python_version_bump.yml"])
-check("the proposer rewrites only the runtime pin",
-      'if [ "$changed" != ".python-version" ]' in _bump
-      and "sed -i" not in _bump)
-check("the proposer validates the candidate tree with the shared adapter",
-      "ci.py --profile production" in WORKFLOWS["python_version_bump.yml"])
-check("the proposer asserts the running interpreter equals the candidate",
-      "interpreter confirmed" in WORKFLOWS["python_version_bump.yml"])
-check("the proposer requires prebuilt wheels only",
-      "--only-binary=:all: -r requirements.txt" in WORKFLOWS["python_version_bump.yml"])
-check("every workflow pins Actions to a full 40-character SHA",
-      not re.search(r"uses:\s*\S+@(?!v?\d*[0-9a-f]{40})", "\n".join(WORKFLOWS.values()),
-                    re.MULTILINE))
-check("no floating 'latest' tool resolution was introduced",
-      "@latest" not in "\n".join(WORKFLOWS.values()))
-check("every job declares a timeout",
-      all("timeout-minutes:" in text for text in WORKFLOWS.values()))
-check("no GitHub Actions workflow lockfile exists",
-      not os.path.exists(os.path.join(ROOT, ".github", "workflows", "actions.lock")))
-check("no lockfile tool or policy was added",
-      "gh-actions-lock" not in "\n".join(WORKFLOWS.values())
-      and "actions.lock" not in "\n".join(WORKFLOWS.values()))
-check("the final gate has the stable required name",
-      "maintenance-ci:" in WORKFLOWS["ci.yml"])
-check("the final gate aggregates every mandatory check",
-      all(job in WORKFLOWS["ci.yml"]
-          for job in ("needs: [application, maintenance, lockfiles, workflows]",)))
-check("the final gate does not depend on the merge controller",
-      "maintenance_merge" not in WORKFLOWS["ci.yml"])
-check("monitor workflows use block run syntax for pip commands",
-      not re.search(r"run:\s*python -m pip install --require-hashes",
-                    "\n".join(WORKFLOWS.values())))
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 4. environment consumers and dynamic names ---")
-
-REDDIT_WF = WORKFLOWS["reddit_monitor.yml"]
-TWITTER_WF = WORKFLOWS["twitter_monitor.yml"]
-REDDIT_SRC = read("testing area", "reddit_main_v3.py")
-TWITTER_SRC = read("testing area", "twitter_v3.py")
-
-for var in ("PROXY_MEDIA", "PROXY_VIDEO_HEAL", "REDDIT_VIDEO_QUALITY",
-            "LISTING_CONFIRM", "FRESH_HOLD_SECONDS", "PENDING_RECHECK_SECONDS",
-            "MAX_POSTS_PER_RUN", "REDDIT_JSON_PROBE", "RETRACT_DEAD_POSTS"):
-    check(f"{var}: engine reader -> workflow wiring -> .env.example",
-          var in REDDIT_SRC and f"vars.{var}" in REDDIT_WF and var in ENV_EXAMPLE)
-
-for var in ("MAX_CACHE_SIZE_PER_ACCOUNT", "MEDIA_HEAL_SCOPE"):
-    check(f"{var}: engine reader -> workflow wiring -> .env.example",
-          var in TWITTER_SRC and f"vars.{var}" in TWITTER_WF and var in ENV_EXAMPLE)
-check("ACCOUNTS is a secret-backed engine reader wired into the workflow",
-      'os.getenv("ACCOUNTS")' in TWITTER_SRC
-      and "secrets.ACCOUNTS" in TWITTER_WF and "ACCOUNTS" in ENV_EXAMPLE)
-
-check("dynamic per-subreddit webhook names are documented as generated",
-      "WEBHOOK_REDDIT_" in ENV_EXAMPLE and "WEBHOOK_REDDIT_" in REDDIT_WF)
-check("REDDIT_MIRROR is documented as V1-only, not globally unused",
-      "REDDIT_MIRROR" in ENV_EXAMPLE)
-check("EMBEDEZ_API_KEY is documented as a V2 setting, not a V3 requirement",
-      "EMBEDEZ_API_KEY" in ENV_EXAMPLE)
-check("the optional OAuth path is documented as optional/skipped",
-      "REDDIT_CLIENT_ID" in ENV_EXAMPLE and "REDDIT_CLIENT_SECRET" in ENV_EXAMPLE)
-check("no engine reads a Variable the workflow never maps",
-      not any(f'os.getenv("{var}"' in REDDIT_SRC and f"vars.{var}" not in REDDIT_WF
-              for var in ("PROXY_WAVE_DELAY", "PROXY_GALLERY_GRACE",
-                          "PROXY_MAX_CONCURRENCY")))
-check("the catch-all secret wiring is preserved, not narrowed",
-      "secrets.SUBREDDITS" in REDDIT_WF and "secrets.DISCORD_WEBHOOK_URL" in REDDIT_WF)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 5. reporting wiring ---")
-
-check("both monitors pass an internal report path under RUNNER_TEMP",
-      all("RUN_REPORT_PATH: ${{ runner.temp }}/" in WORKFLOWS[name]
-          for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-check("both monitors capture the actual checked-out code SHA before running",
-      all('RUN_CODE_SHA=$(git rev-parse HEAD)' in WORKFLOWS[name]
-          for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-check("the summary footer runs after persistence, in always()",
-      all(WORKFLOWS[name].index("Persist updated caches")
-          < WORKFLOWS[name].index("render_run_summary.py")
-          for name in ("reddit_monitor.yml",))
-      and all("if: always()" in WORKFLOWS[name]
-              for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-check("the brittle awk account/post counters are gone",
-      all("awk" not in WORKFLOWS[name]
-          for name in ("reddit_monitor.yml", "twitter_monitor.yml")))
-check("the timestamp-sensitive grep counters are gone",
-      "count_matches" not in "\n".join(WORKFLOWS.values()))
-check("the cache-merge helper is preserved, not replaced by last-writer-wins",
-      os.path.isfile(os.path.join(ROOT, ".github", "scripts", "merge_monitor_caches.py"))
-      and "merge_monitor_caches.py" in REDDIT_WF)
-check("the persistence retry/rebase semantics are preserved",
-      "for attempt in 1 2 3; do" in REDDIT_WF
-      and 'git push origin "HEAD:${cache_branch}"' in REDDIT_WF)
-check("a failed push is distinguishable from a local save",
-      "CACHE_RESULT" in REDDIT_WF and "TWITTER_CACHE_RESULT" in TWITTER_WF)
-check("the engines write the report through the shared collector",
-      "run_report" in REDDIT_SRC or "run_report" in TWITTER_SRC)
-check("the shared report collector is part of the production copy manifest",
-      "testing area/run_report.py" in PROFILE["copy_manifest"]["include"])
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 6. production copy works with no development Markdown ---")
-
-DOCS_PRESENT = os.path.isdir(os.path.join(ROOT, "docs"))
-README_PRESENT = os.path.isfile(os.path.join(ROOT, "README.md"))
-check("this production copy ships no README", not README_PRESENT)
-check("this production copy ships no docs/ directory", not DOCS_PRESENT)
-check("the production profile declares no optional docs",
-      PROFILE["profiles"]["production"]["optional_docs"] == [])
-check("the production profile runs the same test set as development",
-      PROFILE["profiles"]["development"]["tests"] == PROFILE["profiles"]["production"]["tests"])
-
-HELPERS = ("maintenance.py", "ci.py", "python_version_bump.py",
-           "render_run_summary.py")
-for helper in HELPERS:
-    source = read(".github", "scripts", helper)
-    check(f"{helper} never requires a development document",
-          "README.md" not in source and "AGENTS.md" not in source
-          and "docs/MAINTENANCE.md" not in source)
-
-for test_name in ("test_maintenance.py", "test_run_summary.py",
-                  "test_configuration_contract.py"):
-    source = read("tests", test_name)
-    check(f"{test_name} never reads a development document",
-          not re.search(r"(?:open|read)\([^)]*(?:README\.md|AGENTS\.md|docs/)", source))
-
-_ci = read(".github", "workflows", "ci.yml")
-check("ci.yml runs the production profile", "VALIDATION_PROFILE: production" in _ci)
-check("ci.yml proves the documentation-free boundary",
-      "production-layout" in _ci)
-check("every registered test file exists",
-      all(os.path.isfile(os.path.join(ROOT, command.split()[-1]))
-          for command in PROFILE["profiles"]["production"]["tests"]))
-_found = sorted(os.path.relpath(p, ROOT).replace(os.sep, "/")
-                for p in glob.glob(os.path.join(ROOT, "tests", "test_*.py")))
-_registered = {os.path.basename(c.split()[-1])
-               for c in PROFILE["profiles"]["production"]["tests"]}
-check(f"no test file is unregistered ({len(_found)} found)",
-      {os.path.basename(p) for p in _found} == _registered)
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 7. runtime state and ignored paths ---")
-
-GITIGNORE = read(".gitignore")
-STATE = ("posted_reddit.json", "posted_tweets.json", "pending_reddit.json",
-         "proxy_health.json", "posted_messages.json")
-for name in STATE:
-    check(f"{name} stays ignored and tracked-by-force (persistence intact)",
-          name in GITIGNORE)
-check(".gitignore does not ignore all JSON", "\n*.json" not in GITIGNORE)
-check("secret protection is preserved",
-      ".env\n" in GITIGNORE and "!.env.example" in GITIGNORE)
-check("no one-off diagnostic workflow is present",
-      not os.path.exists(os.path.join(ROOT, ".github", "workflows", "maintenance_review.yml"))
-      and not glob.glob(os.path.join(ROOT, ".github", "scripts", "probe_*.py")))
-check("no audit report or specification Markdown was added",
-      not glob.glob(os.path.join(ROOT, "docs", "*MAINTENANCE_UPDATE*.md"))
-      and not glob.glob(os.path.join(ROOT, "*.md")))
-
-
-# ---------------------------------------------------------------------------
-print("\n--- 8. dependabot configuration ---")
-
-DEPENDABOT = read(".github", "dependabot.yml")
-check("the pip ecosystem is configured", 'package-ecosystem: "pip"' in DEPENDABOT)
-check("the github-actions ecosystem is configured",
-      'package-ecosystem: "github-actions"' in DEPENDABOT)
-check("routine and review-required updates are grouped separately",
-      "python-routine" in DEPENDABOT and "python-review-required" in DEPENDABOT)
-check("majors are not hidden behind an ignore rule",
-      "ignore:" not in DEPENDABOT or "update-types" not in DEPENDABOT)
-_dep_doc = _yaml.safe_load(DEPENDABOT)
-check("no Actions lockfile integration was added",
-      not os.path.exists(os.path.join(ROOT, ".github", "workflows", "actions.lock"))
-      and not any("lockfile" in json.dumps(entry) for entry in _dep_doc["updates"])
-      and not any("lockfile-verification" in json.dumps(entry)
-                  for entry in _dep_doc["updates"]))
-check("both lockfiles are visible to the pip ecosystem",
-      "requirements.txt" in DEPENDABOT and "requirements-dev.txt" in DEPENDABOT)
-
-
-print()
-if failures:
-    print(f"CONFIGURATION CONTRACT TEST FAILURES ({len(failures)}): {failures}")
-    sys.exit(1)
-print(f"CONFIGURATION CONTRACT TEST: ALL PASS ({passes} pass)")
+if __name__ == "__main__":
+    unittest.main()

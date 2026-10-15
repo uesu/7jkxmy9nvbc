@@ -1,603 +1,423 @@
 #!/usr/bin/env python3
-"""One explicit validation-command registry for ordinary CI and for the
-runtime-proposer's candidate validation.
+"""Explicit CI command registry for development and production profiles.
 
-Every check is declared once here, in one place, so that:
-
-* ordinary PR CI and the Python-bump candidate job run the *same* set;
-* adding ``tests/test_foo.py`` without registering it fails the
-  ``test-registration`` check instead of silently never running;
-* the ``development`` and ``production`` profiles share the application and
-  maintenance suites, and only differ in the *optional* documentation checks
-  that a manually deployed production copy does not ship.
-
-Usage::
-
-    python .github/scripts/ci.py --profile production --list
-    python .github/scripts/ci.py --profile production
-    python .github/scripts/ci.py --profile development --only lockfiles workflows
-    python .github/scripts/ci.py --profile production --check production-layout
-
-Exit status is 0 only when every selected check passed.
+Every tests/test_*.py file must be registered and executed. Production
+profiles skip optional documentation checks. This adapter never posts,
+never uses production secrets, and never writes GitHub state.
 """
-
 from __future__ import annotations
 
 import argparse
-import glob
+import hashlib
 import os
 import re
-import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import urllib.request
+from pathlib import Path
 
-try:  # maintenance.py sits next to this file
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import maintenance as maint
-except ImportError:  # pragma: no cover - only when the file is moved
-    maint = None
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
-MAINT_IMPORT_ERROR = "maintenance.py could not be imported next to ci.py"
+import maintenance  # noqa: E402
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PROFILE_PATH = os.path.join(REPO_ROOT, ".github", "maintenance.json")
-
-# Pinned wrapper Action SHAs are checked, not the version comments.
-_ACTION_SHA_RE = re.compile(r"uses:\s*[^@\s]+@([0-9a-f]{40})\s*(?:#.*)?$")
-_HEX64_RE = re.compile(r"[0-9a-fA-F]{64}")
-_ACTION_FLOATING_RE = re.compile(r"uses:\s*[^@\s]+@(?!v?\d*[0-9a-f]{40})")
-_WORKFLOW_GLOB = ".github/workflows/*.yml"
-
-# Workflows that post to Discord or push state must never gain a scheduler of
-# their own; cron-job.org is the single external trigger.
-POSTING_WORKFLOWS = ("reddit_monitor.yml", "twitter_monitor.yml")
+REPO_ROOT = maintenance.REPO_ROOT
+TEST_FILE_RE = re.compile(r"^test_.*\.py$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+USES_LINE = re.compile(r"uses:\s*(\S+?)@(\S+)")
 
 
-# ---------------------------------------------------------------------------
-# profile
-# ---------------------------------------------------------------------------
+def discover_tests(root: Path) -> list[str]:
+    tests_dir = root / "tests"
+    found = sorted(p.name for p in tests_dir.glob("test_*.py") if p.is_file())
+    return found
 
 
-def load_profile(profile: str) -> dict:
-    if maint is None:
-        raise SystemExit(MAINT_IMPORT_ERROR)
-    data = maint.load_json(PROFILE_PATH)
-    profiles = data.get("profiles") or {}
-    if profile not in profiles:
-        raise SystemExit(f"unknown profile {profile!r}; known: {sorted(profiles)}")  # noqa: TRY003
-    entry = dict(profiles[profile])
-    entry["name"] = profile
-    entry["contract"] = data.get("contract")
-    return entry
+def registered_tests(profile: dict) -> list[str]:
+    names: list[str] = []
+    commands = profile.get("test_commands") or {}
+    for group in ("application", "maintenance"):
+        for cmd in commands.get(group) or []:
+            if len(cmd) >= 2 and str(cmd[1]).startswith("tests/"):
+                names.append(Path(cmd[1]).name)
+    return names
 
 
-def _python() -> str:
-    return sys.executable or "python3"
+def ensure_all_tests_registered(root: Path, profile: dict) -> None:
+    found = set(discover_tests(root))
+    registered = set(registered_tests(profile))
+    missing = sorted(found - registered)
+    extra = sorted(registered - found)
+    if missing:
+        raise SystemExit(f"unregistered test files: {missing}")
+    if extra:
+        raise SystemExit(f"registered tests missing on disk: {extra}")
 
 
-def _read(path: str) -> str:
-    with open(path, encoding="utf-8") as handle:
-        return handle.read()
+_LAST_OUTPUT: list[str] = []
 
 
-def _locked_names(text: str) -> set[str]:
-    return {
-        m.group(1).lower()
-        for m in re.finditer(r"^(?!\s*#)([a-z0-9_.\-]+)==", text, re.MULTILINE)
-    }
-
-
-# ---------------------------------------------------------------------------
-# individual checks
-# ---------------------------------------------------------------------------
-
-
-def _run(cmd: list[str], cwd: str = REPO_ROOT) -> int:
-    return _run_captured(cmd, cwd)[0]
-
-
-def _run_captured(cmd: list[str], cwd: str = REPO_ROOT) -> tuple[int, str]:
-    """Run a command, echo it, and keep the evidence from a failure.
-
-    Hosted job logs are not always retrievable, and a check whose detail is
-    only a suite name gives a reviewer nothing to act on. Capturing the output
-    lets the failing lines travel inside the check detail, which is what the
-    ::error annotation carries — so the cause survives even when the log blob
-    does not. Output is still streamed so local runs read the same as before.
-    """
-    print(f"$ {' '.join(cmd)}", flush=True)
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    if proc.stdout:
-        print(proc.stdout, end="", flush=True)
-    if proc.stderr:
-        print(proc.stderr, end="", file=sys.stderr, flush=True)
-    return proc.returncode, _failure_evidence(proc.stdout + proc.stderr)
-
-
-def _failure_evidence(output: str, limit: int = 6) -> str:
-    """Last few lines that actually explain a failure, not the whole transcript."""
+def _failure_evidence(output: str, limit: int = 8) -> str:
+    """The lines that actually explain a failure, not the whole transcript."""
     lines = [line for line in output.splitlines() if line.strip()]
     if not lines:
         return ""
     interesting = [
         line for line in lines
-        if line.startswith(("FAIL", "::error", "  File "))
-        or "Traceback" in line
-        or line.rstrip().endswith(("Error", "error"))
+        if line.startswith(("FAIL", "ERROR", "error", "  File ", "##[error]", "x "))
+        or "Traceback" in line or "Error" in line or "assert" in line.lower()
     ]
     picked = interesting[-limit:] if interesting else lines[-limit:]
-    return " | ".join(picked).strip()[:600]
+    return " | ".join(picked).strip()[:800]
 
 
-def check_compile(profile: dict) -> tuple[bool, str]:
-    data = maint.load_json(PROFILE_PATH)
-    globs = data.get("source_globs") or ["testing area", "tests"]
-    code = _run([_python(), "-m", "compileall", "-q", *globs])
-    return code == 0, "compileall over " + ", ".join(globs)
+def run_cmd(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> int:
+    """Run a command, echo it, and retain the tail so a failure can be reported.
 
-
-def _registered_test_commands(profile: dict) -> list[str]:
-    return list(profile.get("tests") or [])
-
-
-def check_test_registration(profile: dict) -> tuple[bool, str]:
-    """Every ``tests/test_*.py`` must be executed by a registered command."""
-    found = sorted(
-        os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
-        for path in glob.glob(os.path.join(REPO_ROOT, "tests", "test_*.py"))
-    )
-    commands = _registered_test_commands(profile)
-    registered = {
-        os.path.basename(part)
-        for command in commands
-        for part in command.split()
-        if part.endswith(".py")
-    }
-    missing = [path for path in found if os.path.basename(path) not in registered]
-    stale = sorted(registered - {os.path.basename(p) for p in found})
-    hidden = _ignored_under_tests()
-    ok = not missing and not stale and not hidden
-    detail = f"{len(found)} test file(s), {len(registered)} registered"
-    if missing:
-        detail += "; NOT REGISTERED: " + ", ".join(missing)
-    if stale:
-        detail += "; registered but absent: " + ", ".join(stale)
-    if hidden:
-        detail += "; IGNORED BY .gitignore (present locally, absent from a fresh checkout): "
-        detail += ", ".join(hidden)
-    return ok, detail
-
-
-def _ignored_under_tests() -> list[str]:
-    """Test inputs that .gitignore would hide from a fresh checkout.
-
-    A scratch pattern written for a generated root-level artifact can match a
-    committed fixture by basename — `persistence*.json` did exactly that, so
-    three fixtures existed locally and were missing on every runner. The suite
-    then failed at import with nothing pointing at .gitignore. Asking git which
-    paths it would skip is the only check that catches this before it ships.
+    Hosted job logs are not always retrievable from the API, and a bare non-zero
+    exit tells a reviewer nothing. Capturing the output lets the failing lines
+    travel inside a ::error annotation, which does survive.
     """
-    tests_dir = os.path.join(REPO_ROOT, "tests")
-    if not os.path.isdir(tests_dir):
-        return []
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--ignored=matching", "--", "tests"],
-        cwd=REPO_ROOT, capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        return []
-    hidden = []
-    for line in proc.stdout.splitlines():
-        if not line.startswith("!!"):
-            continue
-        path = line[2:].strip().strip('"').rstrip("/")
-        if "__pycache__" in path:
-            continue
-        if path.endswith("/"):
-            continue
-        hidden.append(path)
-    return sorted(hidden)
+    print("+", " ".join(cmd), flush=True)
+    completed = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True)
+    if completed.stdout:
+        print(completed.stdout, end="", flush=True)
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr, flush=True)
+    if completed.returncode:
+        _LAST_OUTPUT.append(completed.stdout + completed.stderr)
+    return int(completed.returncode)
 
 
-def check_application(profile: dict) -> tuple[bool, str]:
-    suites = [t for t in _registered_test_commands(profile) if _is_legacy_suite(t)]
-    if not suites:
-        return False, "no application suite registered for this profile"
-    for suite in suites:
-        code, evidence = _run_captured(suite.split())
-        if code != 0:
-            return False, f"{suite} failed — {evidence or 'no output'}"
-    return True, f"{len(suites)} application suite(s) passed"
+def _annotate(group: str, code: int) -> None:
+    """Emit the failure cause as a workflow annotation when running under CI."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or code == 0:
+        return
+    evidence = _failure_evidence(_LAST_OUTPUT[-1] if _LAST_OUTPUT else "")
+    detail = evidence or f"{group} exited {code} with no captured output"
+    print(f"::error title=ci.py {group} failed::{detail}")
 
 
-def _is_legacy_suite(command: str) -> bool:
-    return any(
-        name in command
-        for name in ("test_smoke.py", "test_reddit_signals.py", "test_twitter_media.py")
-    )
-
-
-def check_maintenance(profile: dict) -> tuple[bool, str]:
-    suites = [t for t in _registered_test_commands(profile) if "test_maintenance.py" in t]
-    if not suites:
-        return False, "test_maintenance.py is not registered for this profile"
-    code, evidence = _run_captured(suites[0].split())
-    if code != 0:
-        return False, f"maintenance policy suite failed — {evidence or 'no output'}"
-    return True, "maintenance policy suite"
-
-
-def check_reporting(profile: dict) -> tuple[bool, str]:
-    suites = [t for t in _registered_test_commands(profile) if "test_run_summary.py" in t]
-    if not suites:
-        return False, "test_run_summary.py is not registered for this profile"
-    code, evidence = _run_captured(suites[0].split())
-    if code != 0:
-        return False, f"run-summary renderer suite failed — {evidence or 'no output'}"
-    return True, "run-summary renderer suite"
-
-
-def check_configuration(profile: dict) -> tuple[bool, str]:
-    suites = [
-        t for t in _registered_test_commands(profile) if "test_configuration_contract.py" in t
+def group_application(root: Path, profile: dict) -> int:
+    compile_cmd = profile.get("test_commands", {}).get("compile") or [
+        "python", "-m", "compileall", "-q", "testing area", "tests", ".github/scripts",
     ]
-    if not suites:
-        return False, "test_configuration_contract.py is not registered for this profile"
-    code, evidence = _run_captured(suites[0].split())
-    if code != 0:
-        return False, f"configuration contract suite failed — {evidence or 'no output'}"
-    return True, "configuration contract suite"
-
-
-def check_lockfiles(profile: dict) -> tuple[bool, str]:
-    """Network-free lock integrity: pinned, hashed, canonical header, aligned."""
-    data = maint.load_json(PROFILE_PATH)
-    runtime = data["runtime"]
-    problems: list[str] = []
-
-    for key in ("requirements_lock", "dev_requirements_lock"):
-        path = os.path.join(REPO_ROOT, runtime[key])
-        if not os.path.isfile(path):
-            problems.append(f"missing {runtime[key]}")
-            continue
-        text = _read(path)
-        normalized = maint.normalize_lock_text(text)
-        if normalized != text:
-            problems.append(f"{runtime[key]} header is not the canonical compiler header")
-        if "--hash=sha256:" not in text:
-            problems.append(f"{runtime[key]} has no hashes")
-        # Presence is not integrity: a truncated, padded or mistyped digest
-        # still contains the marker above, and pip would only reject it at
-        # install time — long after a human merged. sha256 is exactly 64 hex
-        # characters, so anything else is provably wrong without network.
-        # (A well-formed but semantically wrong hash cannot be caught offline;
-        # only a hashed install can prove it.)
-        digests = re.findall(r"--hash=sha256:([^\s\\]+)", text)
-        malformed = [d for d in digests if not _HEX64_RE.fullmatch(d)]
-        if malformed:
-            problems.append(
-                f"{runtime[key]} has {len(malformed)} malformed sha256 digest(s); "
-                f"first: {malformed[0][:24]}... (expected 64 hex chars)")
-        loose = re.findall(
-            r"^(?!\s*#)([A-Za-z0-9_.\-\[\]]+)\s*(==|>=|<=|~=|>|<)", text, re.MULTILINE)
-        unpinned = [name for name, op in loose if op != "=="]
-        if unpinned:
-            problems.append(f"{runtime[key]} is not fully pinned: {unpinned}")
-
-    req_in = os.path.join(REPO_ROOT, runtime["requirements_input"])
-    req_lock = os.path.join(REPO_ROOT, runtime["requirements_lock"])
-    if os.path.isfile(req_in) and os.path.isfile(req_lock):
-        lock_text = _read(req_lock).lower()
-        for line in _read(req_in).splitlines():
-            line = line.split("#", 1)[0].strip()
-            if not line or line.startswith("-"):
-                continue
-            name = re.split(r"[<>=!~\[; ]", line, maxsplit=1)[0].strip().lower()
-            if name and f"\n{name}==" not in lock_text and not lock_text.startswith(f"{name}=="):
-                problems.append(
-                    f"{runtime['requirements_input']} requirement {name!r} "
-                    "is not in the lock")
-
-    dev_lock = os.path.join(REPO_ROOT, runtime["dev_requirements_lock"])
-    if os.path.isfile(dev_lock):
-        dev_text = _read(dev_lock).lower()
-        runtime_names = set()
-        if os.path.isfile(req_lock):
-            runtime_names = _locked_names(_read(req_lock))
-        dev_names = _locked_names(dev_text)
-        clash = sorted(runtime_names & dev_names)
-        if clash:
-            problems.append(
-                "dev lock re-pins runtime dependencies (a test tool could replace a "
-                f"runtime dependency): {clash}"
-            )
-
-    return (not problems), ("locks aligned" if not problems else "; ".join(problems))
-
-
-def check_workflows(profile: dict) -> tuple[bool, str]:
-    """YAML parse + pinning / least-privilege / scheduler invariants."""
-    try:
-        import yaml  # type: ignore
-    except ImportError:
-        return False, "PyYAML is not installed; install requirements-dev.txt"
-
-    problems: list[str] = []
-    files = sorted(glob.glob(os.path.join(REPO_ROOT, _WORKFLOW_GLOB)))
-    if not files:
-        return False, f"no workflow matched {_WORKFLOW_GLOB}"
-
-    for path in files:
-        rel = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
-        raw = _read(path)
-        try:
-            doc = yaml.safe_load(raw)
-        except yaml.YAMLError as exc:
-            problems.append(f"{rel}: YAML parse error: {exc}")
-            continue
-        if not isinstance(doc, dict):
-            problems.append(f"{rel}: top level is not a mapping")
-            continue
-
-        # `on:` parses as boolean True in YAML 1.1 — accept either spelling.
-        triggers = doc.get("on", doc.get(True))
-        if not triggers:
-            problems.append(f"{rel}: no triggers")
-
-        perms = doc.get("permissions")
-        if perms is None:
-            problems.append(f"{rel}: no top-level permissions block (least privilege)")
-        elif (isinstance(perms, dict) and perms.get("contents") == "write"
-              and "pull_request_target" in str(triggers)):
-            for job_name, job in (doc.get("jobs") or {}).items():
-                # contents:write is legitimate for a controller that only
-                # merges an already-validated PR. What is NOT legitimate is
-                # holding it while executing PR-supplied code, so the test is
-                # whether any checkout resolves to the PR head.
-                for step in job.get("steps") or []:
-                    if not str(step.get("uses", "")).startswith("actions/checkout"):
-                        continue
-                    ref = str((step.get("with") or {}).get("ref", ""))
-                    trusted = "default_branch" in ref or ref in {"main", "master"}
-                    if not trusted or "head" in ref:
-                        problems.append(
-                            f"{rel}/{job_name}: untrusted checkout ref "
-                            f"{ref!r} under pull_request_target"
-                        )
-
-        name = os.path.basename(rel)
-        if name in POSTING_WORKFLOWS:
-            if isinstance(triggers, dict) and "schedule" in triggers:
-                problems.append(f"{rel}: a posting workflow must not carry its own schedule")
-            concurrency = doc.get("concurrency") or {}
-            if concurrency.get("cancel-in-progress") is not False:
-                problems.append(f"{rel}: cancel-in-progress must stay false")
-            dispatch = (triggers or {}).get("workflow_dispatch")
-            if dispatch is None:
-                problems.append(f"{rel}: workflow_dispatch trigger was removed")
-
-        if name == "maintenance_merge.yml":
-            if "pull_request_target" not in str(triggers):
-                problems.append(f"{rel}: the merge controller must run from the trusted base")
-            for job_name, job in (doc.get("jobs") or {}).items():
-                if job.get("needs"):
-                    problems.append(
-                        f"{rel}/{job_name}: the controller must not depend on another "
-                        "job (no circular gate)"
-                    )
-                for step in job.get("steps") or []:
-                    if not str(step.get("uses", "")).startswith("actions/checkout"):
-                        continue
-                    ref = str((step.get("with") or {}).get("ref", ""))
-                    if "default_branch" not in ref:
-                        problems.append(
-                            f"{rel}/{job_name}: the controller checks out {ref!r}, "
-                            "not the trusted default branch"
-                        )
-
-        if name == "ci.yml":
-            if isinstance(triggers, dict) and "pull_request" not in triggers:
-                problems.append(f"{rel}: PR CI trigger is missing")
-            names = set(doc.get("jobs") or {})
-            gate = (maint.load_json(PROFILE_PATH)["checks"] or {}).get("final_gate")
-            if gate not in names:
-                problems.append(f"{rel}: final gate job {gate!r} is missing")
-
-        for line in raw.splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("uses:"):
-                continue
-            if _ACTION_SHA_RE.match(stripped):
-                continue
-            problems.append(f"{rel}: action is not pinned to a full 40-char SHA -> {stripped}")
-
-    return (not problems), (
-        f"{len(files)} workflow(s) parsed" if not problems else "; ".join(problems)
-    )
-
-
-def check_lint(profile: dict) -> tuple[bool, str]:
-    data = maint.load_json(PROFILE_PATH)
-    paths = [
-        item for item in data["checks"]["lint_paths"]
-        if os.path.exists(os.path.join(REPO_ROOT, item))
-    ]
-    if not paths:
-        return True, "no lint paths present"
-    exe = shutil.which("ruff") or os.path.join(os.path.dirname(_python()), "ruff")
-    if not exe or not os.path.exists(exe):
-        return False, "ruff is not installed; install requirements-dev.txt"
-    code = _run([exe, "check", "--no-cache", *paths])
-    return code == 0, f"ruff over {len(paths)} new helper/test file(s)"
-
-
-def check_manifest(profile: dict) -> tuple[bool, str]:
-    data = maint.load_json(PROFILE_PATH)
-    manifest = data["copy_manifest"]
-    entries = maint.manifest_entries(
-        manifest["include"], REPO_ROOT, exclude_globs=manifest.get("exclude_globs") or ()
-    )
-    missing = sorted(path for path, digest in entries.items() if digest == "MISSING")
-    fp = maint.manifest_fingerprint(entries)
-    print(f"production-copy manifest: {len(entries)} file(s), fingerprint {fp}")
-    for path, digest in entries.items():
-        print(f"  {digest}  {path}")
-    detail = ("manifest complete" if not missing
-              else "missing from the copy manifest: " + ", ".join(missing))
-    return (not missing), detail
-
-
-def check_production_layout(profile: dict) -> tuple[bool, str]:
-    """Prove the docless boundary: run the production profile in a copy of the
-    tree with every optional development document removed."""
-    data = maint.load_json(PROFILE_PATH)
-    optional = set()
-    for entry in (data.get("profiles") or {}).values():
-        optional.update(entry.get("optional_docs") or [])
-    optional.update(
-        item
-        for pattern in (data["copy_manifest"].get("exclude_globs") or [])
-        for item in glob.glob(
-            os.path.join(REPO_ROOT, pattern.rstrip("*").rstrip("/") or "."), recursive=True
-        )
-    )
-
-    with tempfile.TemporaryDirectory(prefix="prod-layout-") as tmp:
-        for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
-            dirnames[:] = [d for d in dirnames if d not in {".git", "__pycache__", ".arena"}]
-            rel_dir = os.path.relpath(dirpath, REPO_ROOT)
-            target_dir = tmp if rel_dir == "." else os.path.join(tmp, rel_dir)
-            os.makedirs(target_dir, exist_ok=True)
-            for filename in filenames:
-                src = os.path.join(dirpath, filename)
-                rel = os.path.relpath(src, REPO_ROOT).replace(os.sep, "/")
-                if rel in optional or rel.startswith(("docs/", "docs" + os.sep)):
-                    continue
-                shutil.copy2(src, os.path.join(target_dir, filename))
-
-        leftover = sorted(
-            os.path.relpath(p, tmp).replace(os.sep, "/")
-            for p in glob.glob(os.path.join(tmp, "**"), recursive=True)
-            if os.path.isfile(p)
-            and (
-                os.path.relpath(p, tmp).replace(os.sep, "/") in optional
-                or os.path.relpath(p, tmp).replace(os.sep, "/").startswith("docs/")
-            )
-        )
-        if leftover:
-            return False, (
-                "development docs leaked into the production layout: "
-                + ", ".join(leftover)
-            )
-
-        code = _run([_python(), os.path.join(".github", "scripts", "ci.py"),
-                     "--profile", "production", "--skip", "production-layout"], cwd=tmp)
-        # Report the outcome that actually happened: printing the success string on
-        # failure would send a reader looking for a doc problem that is not
-        # there, when the real cause is a check that failed without any docs.
-        if code == 0:
-            return True, "production profile passed with no README/AGENTS/docs present"
-        return False, (
-            f"the production profile FAILED (exit {code}) inside a copy of the tree "
-            "with every optional development document removed — some check depends "
-            "on a doc this repository does not ship"
-        )
-
-
-CHECKS: dict[str, tuple[str, object]] = {
-    "compile": ("compile every engine and test module", check_compile),
-    "test-registration": ("every tests/test_*.py runner is registered", check_test_registration),
-    "application": ("application regression suites", check_application),
-    "maintenance": ("maintenance policy suite", check_maintenance),
-    "reporting": ("run-summary renderer suite", check_reporting),
-    "configuration": ("configuration contract suite", check_configuration),
-    "lockfiles": ("frozen dependency lock integrity", check_lockfiles),
-    "workflows": ("workflow YAML parse + pin/privilege/scheduler invariants", check_workflows),
-    "lint": ("pinned ruff over new helper/test code", check_lint),
-    "manifest": ("production-copy manifest", check_manifest),
-    "production-layout": ("documentation-free production layout", check_production_layout),
-}
-
-DEFAULT_ORDER = [
-    "test-registration",
-    "compile",
-    "lockfiles",
-    "workflows",
-    "lint",
-    "manifest",
-    "application",
-    "maintenance",
-    "reporting",
-    "configuration",
-    "production-layout",
-]
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", default="production", choices=("development", "production"))
-    parser.add_argument("--only", nargs="*", default=None, help="run just these checks")
-    parser.add_argument("--skip", nargs="*", default=None, help="skip these checks")
-    parser.add_argument("--list", action="store_true", help="print the registry and exit")
-    args = parser.parse_args(argv)
-
-    profile = load_profile(args.profile)
-    selected = args.only or DEFAULT_ORDER
-    skipped = set(args.skip or [])
-    unknown = [name for name in selected if name not in CHECKS]
-    if unknown:
-        print(f"unknown check(s): {unknown}; known: {sorted(CHECKS)}", file=sys.stderr)
-        return 2
-
-    if args.list:
-        print(f"profile: {profile['name']}   contract: {profile.get('contract')}")
-        for name in selected:
-            if name in skipped:
-                continue
-            print(f"  {name:<20} {CHECKS[name][0]}")
-        for command in profile.get("tests") or []:
-            print(f"  registered test: {command}")
-        return 0
-
-    failures: list[str] = []
-    for name in selected:
-        if name in skipped:
-            print(f"\n=== {name}: SKIPPED by request ===")
-            continue
-        label, func = CHECKS[name]
-        print(f"\n=== {name}: {label} ===")
-        try:
-            ok, detail = func(profile)  # type: ignore[operator]
-        except Exception as exc:  # noqa: BLE001 - a check crash is a failure, not a skip
-            ok, detail = False, f"{type(exc).__name__}: {exc}"
-        print(f"--- {name}: {'PASS' if ok else 'FAIL'} — {detail}")
-        if not ok:
-            failures.append(f"{name}: {detail}")
-
-    print("\n================ summary ================")
-    print(f"profile: {profile['name']}")
-    print(f"checks run: {len(selected) - len(skipped & set(selected))}")
-    if failures:
-        print("FAILED:")
-        for failure in failures:
-            print(f"  - {failure}")
-        # Surface failures as workflow annotations too. Hosted logs can be
-        # unreachable to a reviewer or an automation client, and a bare
-        # "Process completed with exit code 1" names no cause; annotations are
-        # readable through the check-runs API, so the reason travels with the
-        # failure instead of only living in the log blob.
-        if os.environ.get("GITHUB_ACTIONS") == "true":
-            for failure in failures:
-                check_name, _, reason = failure.partition(":")
-                # "::" would terminate the annotation's property section early
-                # and swallow the message, so the title uses a single colon.
-                print(f"::error title=ci.py {check_name.strip()} failed::"
-                      f"{reason.strip()}")
-        return 1
-    print("ALL CHECKS PASS")
+    code = run_cmd(list(compile_cmd), cwd=root)
+    if code:
+        return code
+    for cmd in profile.get("test_commands", {}).get("application") or []:
+        code = run_cmd(list(cmd), cwd=root)
+        if code:
+            return code
     return 0
 
 
+def group_maintenance(root: Path, profile: dict) -> int:
+    for cmd in profile.get("test_commands", {}).get("maintenance") or []:
+        code = run_cmd(list(cmd), cwd=root)
+        if code:
+            return code
+    ruff = profile.get("ruff") or {}
+    paths = list(ruff.get("paths") or [])
+    existing = [p for p in paths if (root / p).exists()]
+    if existing:
+        code = run_cmd(["python", "-m", "ruff", "check", *existing], cwd=root)
+        if code:
+            return code
+    return 0
+
+
+def _normalize_lock(path: Path) -> str:
+    return maintenance.normalize_compile_header(path.read_text(encoding="utf-8"))
+
+
+def group_lock_consistency(root: Path, profile: dict) -> int:
+    runtime = root / "requirements.txt"
+    dev = root / "requirements-dev.txt"
+    if not runtime.is_file():
+        print("missing requirements.txt", file=sys.stderr)
+        return 1
+    if " --hash=" not in runtime.read_text(encoding="utf-8"):
+        print("requirements.txt is not a hashed lock", file=sys.stderr)
+        return 1
+    before_runtime = _normalize_lock(runtime)
+    before_dev = _normalize_lock(dev) if dev.is_file() else ""
+    env = os.environ.copy()
+    env["CUSTOM_COMPILE_COMMAND"] = str(profile.get("custom_compile_command") or "")
+    compile_cmd = list(profile.get("compile_command") or [])
+    if not compile_cmd:
+        print("compile_command missing from profile", file=sys.stderr)
+        return 1
+    code = run_cmd(compile_cmd, cwd=root, env=env)
+    if code:
+        return code
+    after_runtime = _normalize_lock(runtime)
+    if after_runtime != before_runtime:
+        print("requirements.txt regeneration produced a diff", file=sys.stderr)
+        return 1
+    dev_cmd = list(profile.get("dev_compile_command") or [])
+    if dev_cmd and (root / "requirements-dev.in").is_file():
+        env["CUSTOM_COMPILE_COMMAND"] = "python -m piptools compile --generate-hashes --allow-unsafe --resolver=backtracking --strip-extras --output-file=requirements-dev.txt requirements-dev.in"
+        code = run_cmd(dev_cmd, cwd=root, env=env)
+        if code:
+            return code
+        after_dev = _normalize_lock(dev)
+        if after_dev != before_dev:
+            print("requirements-dev.txt regeneration produced a diff", file=sys.stderr)
+            return 1
+    return 0
+
+
+def _parse_yaml(path: Path):
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        print("PyYAML is required for workflow validation (dev dependency)", file=sys.stderr)
+        raise
+    with path.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def _iter_steps(doc: dict):
+    jobs = doc.get("jobs") or {}
+    if not isinstance(jobs, dict):
+        return
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps") or []
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if isinstance(step, dict):
+                yield job_name, job, step
+
+
+def group_workflow_security(root: Path, profile: dict) -> int:
+    workflows = sorted((root / ".github" / "workflows").glob("*.yml"))
+    errors: list[str] = []
+    if not workflows:
+        errors.append("no workflow files")
+    forbidden_lock = root / ".github" / "workflows" / "actions.lock"
+    if forbidden_lock.exists():
+        errors.append("Actions workflow lockfile is forbidden")
+    declared_names: set[str] = set()
+    controller_triggers: set[str] = set()
+    for path in workflows:
+        try:
+            doc = _parse_yaml(path)
+        except Exception as exc:  # includes YAMLError
+            errors.append(f"{path.name}: YAML parse failed: {exc}")
+            continue
+        if not isinstance(doc, dict):
+            errors.append(f"{path.name}: workflow is not a mapping")
+            continue
+        jobs = doc.get("jobs") or {}
+        if not isinstance(jobs, dict) or not jobs:
+            errors.append(f"{path.name}: no jobs")
+            continue
+        on = doc.get("on") or doc.get(True)
+        name = str(doc.get("name") or path.name)
+        declared_names.add(name)
+        if path.name == "maintenance_merge.yml":
+            trigger = (on or {}).get("workflow_run") if isinstance(on, dict) else None
+            wanted = (trigger or {}).get("workflows") if isinstance(trigger, dict) else None
+            if isinstance(wanted, str):
+                wanted = [wanted]
+            controller_triggers.update(str(w) for w in wanted or [])
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                errors.append(f"{path.name}: job {job_name} malformed")
+                continue
+            if "timeout-minutes" not in job:
+                errors.append(f"{path.name}: job {job_name} missing timeout-minutes")
+        text = path.read_text(encoding="utf-8")
+        for match in USES_LINE.finditer(text):
+            action, ref = match.group(1), match.group(2).strip()
+            ref = ref.split("#", 1)[0].strip()
+            if ref in {"latest", "main", "master"} or re.fullmatch(r"v\d+", ref):
+                errors.append(f"{path.name}: floating action ref {action}@{ref}")
+            elif not SHA_RE.fullmatch(ref.lower()):
+                errors.append(f"{path.name}: action ref is not a 40-char SHA: {action}@{ref}")
+        if path.name in {"reddit_monitor.yml", "twitter_monitor.yml"}:
+            if "cancel-in-progress: false" not in text:
+                errors.append(f"{path.name}: cancel-in-progress must stay false")
+            if re.search(r"^\s+schedule:", text, re.M) and "DISABLED" not in text:
+                errors.append(f"{path.name}: native schedule must stay disabled")
+        if path.name == "ci.yml":
+            perms = doc.get("permissions")
+            if perms != {"contents": "read"} and perms != "read-all":
+                # contents: read is the required least privilege for PR CI
+                if not (isinstance(perms, dict) and perms.get("contents") == "read" and set(perms) <= {"contents"}):
+                    errors.append("ci.yml must use contents: read only")
+            if "pull_request_target" in text:
+                errors.append("ci.yml must not use pull_request_target")
+            if "secrets." in text and "github.token" not in text.lower():
+                # CI should not wire production monitor secrets
+                if "DISCORD_WEBHOOK" in text or "BUMP_PAT" in text:
+                    errors.append("ci.yml must not use production secrets")
+        if path.name == "maintenance_merge.yml":
+            if "actions/checkout" in text and "pull_request" in str(on):
+                if "ref:" not in text and "default_branch" not in text:
+                    errors.append("merge controller must not check out PR head")
+        if "gh-actions-lock" in text or "actions.lock" in text:
+            errors.append(f"{path.name}: Actions lockfile integration is forbidden")
+        colon_run = re.search(r"^\s+run:\s+.*:", text, re.M)
+        if colon_run and "run: |" not in text[max(0, colon_run.start() - 80):colon_run.end()]:
+            # pip arguments with colons must use block scalars; flag likely offenders
+            line = colon_run.group(0)
+            if "--only-binary" in line or "python-version:" in line:
+                errors.append(f"{path.name}: colon-bearing run value must use a block scalar")
+    # The merge controller fires on workflow_run keyed by the CI workflow's
+    # *declared name*, not its filename. If either side drifts the controller
+    # simply never runs and every auto-merge silently stops — with green CI.
+    expected_ci = str(profile.get("ci_workflow_name") or "")
+    if expected_ci and expected_ci not in declared_names:
+        errors.append(
+            f"no workflow declares the name {expected_ci!r} that the policy "
+            f"and the merge controller depend on"
+        )
+    for wanted in sorted(controller_triggers):
+        if wanted not in declared_names:
+            errors.append(
+                f"maintenance_merge.yml waits on workflow {wanted!r}, which no "
+                f"workflow declares; the controller would never fire"
+            )
+    if errors:
+        for item in errors:
+            print(item, file=sys.stderr)
+        return 1
+    actionlint = profile.get("actionlint") or {}
+    code = maybe_run_actionlint(root, actionlint)
+    if code:
+        return code
+    return 0
+
+
+def maybe_run_actionlint(root: Path, spec: dict) -> int:
+    """Run the pinned actionlint; a tool that cannot run is a failure in CI.
+
+    Counting an unavailable download as a pass is how a mandatory security check
+    goes silently green, so the skip is only honoured outside CI. Under
+    GITHUB_ACTIONS the pinned tool must actually execute.
+    """
+    url = str(spec.get("url") or "")
+    sha256 = str(spec.get("sha256") or "")
+    in_ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    if not url or not sha256:
+        print("actionlint is not pinned in the policy", file=sys.stderr)
+        return 1
+    if os.environ.get("SKIP_ACTIONLINT") == "1":
+        if in_ci:
+            print("SKIP_ACTIONLINT is not honoured in CI", file=sys.stderr)
+            return 1
+        print("actionlint skipped locally (SKIP_ACTIONLINT=1)")
+        return 0
+    dest_dir = Path(tempfile.mkdtemp(prefix="actionlint-"))
+    archive = dest_dir / "actionlint.tgz"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "news-express-ci"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            archive.write_bytes(resp.read())
+    except Exception as exc:
+        message = f"actionlint download failed ({exc})"
+        if in_ci:
+            print(message + " — mandatory check cannot be skipped in CI", file=sys.stderr)
+            return 1
+        print(message + "; Python workflow checks already ran (local only)")
+        return 0
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != sha256:
+        print(f"actionlint checksum mismatch: {digest} != {sha256}", file=sys.stderr)
+        return 1
+    with tarfile.open(archive) as tar:
+        tar.extractall(dest_dir)
+    binary = dest_dir / "actionlint"
+    if not binary.exists():
+        print("actionlint binary missing from archive", file=sys.stderr)
+        return 1
+    binary.chmod(0o755)
+    return run_cmd([str(binary), "-color"], cwd=root)
+
+
+def group_docs(root: Path, profile: dict, require_docs: bool) -> int:
+    docs = [root / rel for rel in (profile.get("optional_docs") or [])]
+    missing = [str(p.relative_to(root)) for p in docs if not p.exists()]
+    if missing and require_docs:
+        print("missing development docs:", ", ".join(missing), file=sys.stderr)
+        return 1
+    if missing and not require_docs:
+        print("optional docs absent (production profile) — OK:", ", ".join(missing))
+    return 0
+
+
+def final_gate(results: dict[str, int]) -> int:
+    """Succeed only when every mandatory dependency actually succeeded."""
+    failed = [name for name, code in results.items() if code != 0]
+    if failed:
+        print("maintenance-ci failed because:", ", ".join(failed), file=sys.stderr)
+        return 1
+    if any(code is None for code in results.values()):
+        print("maintenance-ci failed: a mandatory check did not run", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--profile", choices=("development", "production"), default="development")
+    parser.add_argument(
+        "--group",
+        choices=("application", "maintenance", "lock-consistency", "workflow-security", "docs", "all", "final"),
+        default="all",
+    )
+    parser.add_argument("--root", default=str(REPO_ROOT))
+    parser.add_argument("--maintenance-json", default=str(maintenance.DEFAULT_PROFILE))
+    parser.add_argument("--results-json", default="", help="for --group final")
+    args = parser.parse_args(argv)
+
+    root = Path(args.root)
+    profile = maintenance.load_profile(args.maintenance_json)
+    os.chdir(root)
+    ensure_all_tests_registered(root, profile)
+
+    require_docs = bool((profile.get("profiles") or {}).get(args.profile, {}).get("require_docs"))
+    if args.profile == "production":
+        require_docs = False
+
+    if args.group == "final":
+        import json
+        results = json.loads(Path(args.results_json).read_text(encoding="utf-8"))
+        return final_gate(results)
+
+    dispatch = {
+        "application": lambda: group_application(root, profile),
+        "maintenance": lambda: group_maintenance(root, profile),
+        "lock-consistency": lambda: group_lock_consistency(root, profile),
+        "workflow-security": lambda: group_workflow_security(root, profile),
+        "docs": lambda: group_docs(root, profile, require_docs),
+    }
+    if args.group != "all":
+        _LAST_OUTPUT.clear()
+        code = dispatch[args.group]()
+        _annotate(args.group, code)
+        return code
+
+    results = {}
+    for name, fn in dispatch.items():
+        _LAST_OUTPUT.clear()
+        if name == "docs" and args.profile == "production":
+            results[name] = group_docs(root, profile, False)
+            continue
+        results[name] = fn()
+        _annotate(name, results[name])
+        if results[name] != 0 and name != "docs":
+            return results[name]
+    return final_gate({k: v for k, v in results.items() if k != "docs" or require_docs})
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

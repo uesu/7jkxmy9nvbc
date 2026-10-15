@@ -1,16 +1,9 @@
-name: CI — read-only validation + maintenance gate
+name: CI — syntax + offline smoke test
 
-# Safety gate for every PR (Dependabot, runtime-proposer or human) and for
-# pushes to main. Read-only: `contents: read`, no production secrets, and
-# checkout credentials are not persisted.
-#
-# Every command is declared once in .github/scripts/ci.py, so this workflow and
-# the runtime-proposer's candidate validation run the SAME set. Adding
-# tests/test_*.py without registering it fails the test-registration check
-# instead of silently never running.
-#
-# Production copies ship no README/AGENTS/docs directory; nothing here reads
-# one. The `production` profile is the one this repository validates with.
+# Safety gate for Dependabot, runtime-proposer, and human PRs. Proves the
+# monitors still install from the frozen graph, compile, and pass every
+# registered tests/test_*.py runner before merge. Never posts, never uses
+# production secrets, never checks out with persisted credentials.
 
 on:
   pull_request:
@@ -20,53 +13,33 @@ on:
 permissions:
   contents: read
 
-env:
-  # This repository is a manually deployed production copy: no development
-  # documentation is present and none may be required.
-  VALIDATION_PROFILE: production
-  CHECKOUT_SHA: 3d3c42e5aac5ba805825da76410c181273ba90b1  # actions/checkout v7
-  SETUP_PYTHON_SHA: 5fda3b95a4ea91299a34e894583c3862153e4b97  # actions/setup-python v7
-
 jobs:
   application:
-    name: application
     runs-on: ubuntu-latest
-    # Suites finish in ~2 min; 15 is a generous ceiling.
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned (immutable supply chain)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
         with:
           persist-credentials: false
 
-      - name: Set up Python (exact pin from .python-version)
+      - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
         with:
-          # The single runtime source of truth. A patch bump rewrites
-          # .python-version only — no README prose and no hard-coded test
-          # expectation is rewritten for it.
-          python-version-file: '.python-version'
+          python-version-file: .python-version
           cache: 'pip'
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
 
-      - name: Install the frozen runtime + tool graph (hash-verified)
+      - name: Install frozen runtime
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
-          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 
-      # Registered application suites (enforced by `ci.py test-registration`):
-      #   python tests/test_smoke.py
-      #   python tests/test_reddit_signals.py
-      #   python tests/test_twitter_media.py
-      - name: Compile + registration + application suites
-        run: |
-          python .github/scripts/ci.py --profile "$VALIDATION_PROFILE" \
-            --only compile test-registration application
+      - name: Application tests
+        run: python .github/scripts/ci.py --profile development --group application
 
   maintenance:
-    name: maintenance
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -75,34 +48,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python (exact pin from .python-version)
+      - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
         with:
-          python-version-file: '.python-version'
+          python-version-file: .python-version
           cache: 'pip'
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
 
-      - name: Install the frozen runtime + tool graph (hash-verified)
+      - name: Install runtime plus dev tools
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
           python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 
-      # Registered maintenance suites:
-      #   python tests/test_maintenance.py
-      #   python tests/test_run_summary.py
-      #   python tests/test_configuration_contract.py
-      # The last check rebuilds a documentation-free production layout and runs
-      # the whole production profile inside it — proof that runtime maintenance
-      # needs no development Markdown.
-      - name: Maintenance, reporting, configuration and production-layout checks
-        run: |
-          python .github/scripts/ci.py --profile "$VALIDATION_PROFILE" \
-            --only maintenance reporting configuration manifest production-layout
+      - name: Maintenance, reporting, and configuration tests
+        run: python .github/scripts/ci.py --profile development --group maintenance
 
-  lockfiles:
-    name: lockfiles
+  lock-consistency:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -111,93 +74,68 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python (exact pin from .python-version)
+      - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
         with:
-          python-version-file: '.python-version'
+          python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-      - name: Structural lock integrity (pinned, hashed, aligned with the input)
-        run: python .github/scripts/ci.py --profile "$VALIDATION_PROFILE" --only lockfiles
-
-      # A stale input/lock pair is a failed gate: regenerate with the pinned
-      # compiler in an isolated environment and require a byte-identical lock.
-      - name: Lock regeneration is reproducible
-        run: |
-          set -euo pipefail
-          python -m venv .compiler
-          .compiler/bin/python -m pip install --quiet --upgrade "pip==26.1.1" "pip-tools==7.5.3"
-          CUSTOM_COMPILE_COMMAND="python -m piptools compile --generate-hashes --allow-unsafe --resolver=backtracking --strip-extras --output-file=requirements.txt requirements.in" \
-            .compiler/bin/python -m piptools compile --quiet --generate-hashes --allow-unsafe \
-            --resolver=backtracking --strip-extras --output-file=/tmp/requirements.check.txt requirements.in
-          CUSTOM_COMPILE_COMMAND="python -m piptools compile --generate-hashes --allow-unsafe --resolver=backtracking --strip-extras --constraint=requirements.txt --output-file=requirements-dev.txt requirements-dev.in" \
-            .compiler/bin/python -m piptools compile --quiet --generate-hashes --allow-unsafe \
-            --resolver=backtracking --strip-extras --constraint=requirements.txt \
-            --output-file=/tmp/requirements-dev.check.txt requirements-dev.in
-          python - <<'PY'
-          import sys
-          sys.path.insert(0, ".github/scripts")
-          import maintenance as m
-          pairs = [("requirements.txt", "/tmp/requirements.check.txt"),
-                   ("requirements-dev.txt", "/tmp/requirements-dev.check.txt")]
-          bad = []
-          for committed, regenerated in pairs:
-              a = m.normalize_lock_text(open(committed, encoding="utf-8").read())
-              b = m.normalize_lock_text(open(regenerated, encoding="utf-8").read())
-              if a != b:
-                  bad.append(committed)
-          if bad:
-              print("::error::stale lock(s): " + ", ".join(bad))
-              sys.exit(1)
-          print("locks regenerate byte-identically under the pinned compiler")
-          PY
-
-  workflows:
-    name: workflows
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
-        with:
-          persist-credentials: false
-
-      - name: Set up Python (exact pin from .python-version)
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
-        with:
-          python-version-file: '.python-version'
-
-      - name: Install the pinned tool graph (hash-verified, from the dev lock)
+      - name: Install compiler toolchain from the dev lock
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 
-      - name: Workflow YAML parse + pin/privilege/scheduler invariants, then pinned ruff
-        run: |
-          python .github/scripts/ci.py --profile "$VALIDATION_PROFILE" --only workflows lint
+      - name: Recompile hashed locks and require a byte-stable result
+        run: python .github/scripts/ci.py --profile development --group lock-consistency
 
-  # Stable final mandatory gate. It depends on every mandatory check and never
-  # on the merge controller, so there is no circular dependency; its always()
-  # implementation succeeds only when each dependency actually succeeded.
+  workflow-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
+        with:
+          python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install runtime plus YAML/ruff toolchain
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+
+      - name: Workflow YAML, pinning, and actionlint
+        run: python .github/scripts/ci.py --profile development --group workflow-security
+
   maintenance-ci:
     name: maintenance-ci
+    if: always()
+    needs: [application, maintenance, lock-consistency, workflow-security]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [application, maintenance, lockfiles, workflows]
-    if: always()
     steps:
-      - name: Aggregate the mandatory checks
-        env:
-          RESULTS: ${{ toJSON(needs) }}
+      - name: Require every mandatory dependency to have succeeded
         run: |
           python - <<'PY'
-          import json, os, sys
-          needs = json.loads(os.environ["RESULTS"])
-          mandatory = {"application", "maintenance", "lockfiles", "workflows"}
-          missing = sorted(mandatory - set(needs))
-          bad = [f"{k}={v.get('result')}" for k, v in sorted(needs.items())
-                 if v.get("result") != "success"]
-          if missing or bad:
-              print("::error::mandatory checks not all successful: "
-                    + (", ".join(missing + bad) or "none"))
+          import sys
+          results = {
+              "application": "${{ needs.application.result }}",
+              "maintenance": "${{ needs.maintenance.result }}",
+              "lock-consistency": "${{ needs.lock-consistency.result }}",
+              "workflow-security": "${{ needs.workflow-security.result }}",
+          }
+          failed = [name for name, value in results.items() if value != "success"]
+          if failed:
+              print("maintenance-ci blocked:", failed, "->", results)
               sys.exit(1)
           print("maintenance-ci: all mandatory checks succeeded")
           PY

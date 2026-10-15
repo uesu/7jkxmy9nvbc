@@ -1,84 +1,29 @@
-# Dependabot — automatic dependency updates.
+# Dependabot — frozen pip graph + GitHub Actions SHA pins.
+# Routine patch/minor package updates are grouped separately from majors.
+# There is no Actions lockfile integration.
 #
-# Weekly checks for the frozen Python package graph and the SHA-pinned GitHub
-# Actions. Every update opens a PULL REQUEST; nothing touches main until
-# .github/workflows/maintenance_merge.yml validates the FINAL PR head (or the
-# maintainer merges by hand).
-#
-# ROUTINE vs REVIEW-REQUIRED
-# A routine group carries allowlisted in-range patch/minor updates, which the
-# merge controller may auto-merge when AUTO_MERGE_DEPENDABOT=yes and every gate
-# passed. Anything with breaking risk — a major, a prerelease, an ambiguous
-# version, a breaking-risk 0.x minor — lands in the review-required group and
-# always waits for the maintainer. Majors are separated, never hidden behind an
-# ignore rule.
-#
-# LOCKFILES
-# requirements.txt and requirements-dev.txt are GENERATED (pip-compile with
-# hashes). Dependabot updates the pip ecosystem by regenerating them; the CI
-# `lockfiles` job fails a stale input/lock pair, and CI additionally proves the
-# committed locks regenerate byte-identically under the pinned compiler.
-#
-# There is deliberately NO GitHub Actions workflow lockfile integration: the
-# maintainer deferred that preview feature. Actions stay pinned to reviewed
-# full 40-character SHAs.
-#
-# To DISABLE completely: delete this file. The monitors are unaffected.
+# Merges are decided by maintenance_merge.yml, not by this file.
 version: 2
 updates:
-  # ---- routine Python dependency updates --------------------------------
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    # requirements.txt / requirements-dev.txt are compiled outputs, so an
-    # ordinary in-range release is a lockfile regeneration, not a manifest edit.
-    versioning-strategy: increase-if-necessary
+    # Compiled hashed requirements.txt is the lock Dependabot regenerates.
+    versioning-strategy: lockfile-only
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "python"
-      - "routine"
     commit-message:
       prefix: "deps(python)"
     groups:
       python-routine:
         patterns: ["*"]
-        exclude-patterns:
-          # Majors and prereleases never ride in the routine group: the
-          # highest-risk member would otherwise control the whole PR.
-          - "aiohttp"
-          - "feedparser"
-          - "python-dotenv"
-        update-types:
-          - "minor"
-          - "patch"
+        update-types: ["patch", "minor"]
+    # Major upgrades stay ungrouped so they cannot hide inside the routine PR.
 
-  # ---- review-required Python dependency updates ------------------------
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    versioning-strategy: increase-if-necessary
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "python"
-      - "review-required"
-    commit-message:
-      prefix: "deps(python)"
-    groups:
-      python-review-required:
-        patterns:
-          - "aiohttp"
-          - "feedparser"
-          - "python-dotenv"
-        update-types:
-          - "major"
-
-  # ---- GitHub Actions ----------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -91,5 +36,6 @@ updates:
     commit-message:
       prefix: "deps(actions)"
     groups:
-      actions:
+      actions-routine:
         patterns: ["*"]
+        update-types: ["patch", "minor"]

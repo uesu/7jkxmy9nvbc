@@ -67,27 +67,37 @@ jobs:
           git fetch origin "${CACHE_BRANCH:-main}"
           git reset --hard FETCH_HEAD
           echo "Now at $(git log -1 --format=%H) (live ${CACHE_BRANCH:-main} tip)."
-          # Capture the ACTUAL checked-out code SHA before anything executes.
-          # GITHUB_SHA is pinned at dispatch time and a queued run starts on a
-          # stale tip, so it is not the code this run really used.
-          echo "RUN_CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned (round 57)
         with:
-          # The exact stable CPython pin lives in .python-version — the single
-          # runtime source of truth. A patch bump rewrites that one file; this
-          # workflow is not rewritten for it.
-          python-version-file: '.python-version'
+          python-version-file: .python-version
           cache: 'pip'
           cache-dependency-path: requirements.txt
 
-      - name: Install the frozen runtime graph (hash-verified)
+      - name: Record checked-out code SHA and report paths
+        run: |
+          echo "MONITOR_CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "RUN_REPORT_PATH=${RUNNER_TEMP}/news-express-reddit-report.json" >> "$GITHUB_ENV"
+          echo "PERSISTENCE_REPORT_PATH=${RUNNER_TEMP}/news-express-reddit-persistence.json" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import hashlib, os, sys
+          digest = hashlib.sha256(open("requirements.txt", "rb").read()).hexdigest()
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"DEPENDENCY_LOCK_DIGEST={digest}\n")
+              fh.write(f"PYTHON_VERSION_ACTUAL={sys.version.split()[0]}\n")
+          PY
+
+      - name: Install frozen runtime
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
 
       - name: Run Reddit Feed Monitor
         env:
+          RUN_REPORT_PATH: ${{ env.RUN_REPORT_PATH }}
+          MONITOR_CODE_SHA: ${{ env.MONITOR_CODE_SHA }}
+          PYTHON_VERSION_ACTUAL: ${{ env.PYTHON_VERSION_ACTUAL }}
+          DEPENDENCY_LOCK_DIGEST: ${{ env.DEPENDENCY_LOCK_DIGEST }}
           SUBREDDITS: ${{ secrets.SUBREDDITS }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           # EMBEDEZ_API_KEY: ${{ secrets.EMBEDEZ_API_KEY }}   # round 13: no longer used —
@@ -176,11 +186,6 @@ jobs:
           # and the feed-token .json probe re-enables itself (auto mode).
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          # Structured run report: an internal path under RUNNER_TEMP.
-          # The engine writes bounded counters there; the renderer below
-          # reads it AFTER persistence and makes no requests of its own.
-          RUN_REPORT_PATH: ${{ runner.temp }}/run-report.json
-          RUN_LOCK_PATH: requirements.txt
         # ───────────────────────────────────────────────────────────────────
         # TESTING AREA (how updates ship):
         # • A new/changed script lives in "testing area/" FIRST (e.g.
@@ -207,8 +212,11 @@ jobs:
       - name: Persist updated caches (retry safely on a concurrent main update)
         env:
           CACHE_BRANCH: ${{ github.ref_name }}
+          PERSISTENCE_REPORT_PATH: ${{ env.PERSISTENCE_REPORT_PATH }}
         run: |
           echo "CACHE_RESULT=failed" >> "$GITHUB_ENV"
+          write_persist() { python -c 'import json,os,sys; p=os.environ.get("PERSISTENCE_REPORT_PATH") or ""; (p or sys.exit(0)); open(p,"w",encoding="utf-8").write(json.dumps({"local_save":sys.argv[1],"commit":sys.argv[2],"remote_push":sys.argv[3]})+"\n")' "$1" "$2" "$3"; }
+          write_persist not-run not-run not-run
           set -o pipefail
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -216,13 +224,14 @@ jobs:
           if [ -f posted_messages.json ]; then
             git add -f posted_messages.json
           fi
-
           if git diff --cached --quiet; then
             echo "No cache changes to push."
             echo "CACHE_RESULT=success" >> "$GITHUB_ENV"
+            write_persist saved unchanged unchanged
           else
             if ! git commit -m "auto: update reddit monitor caches"; then
               echo "::error::CACHE COMMIT FAILED — dedup cache was not persisted; rerun this monitor after resolving the repository state."
+              write_persist saved failed not-run
               exit 1
             fi
 
@@ -279,48 +288,17 @@ jobs:
 
             if [ "$pushed" -ne 1 ]; then
               echo "::error::CACHE PUSH FAILED after ${attempts}/3 attempt(s) — dedup cache was not persisted; the next run may re-post. Rerun this monitor after GitHub recovers."
+              write_persist saved committed failed
               exit 1
             fi
+            write_persist saved committed pushed
           fi
           echo "CACHE_RESULT=success" >> "$GITHUB_ENV"
 
-      # Distinguish local save, commit and remote push. A local JSON save is
-      # never reported as a successful push, and a missing record is reported
-      # as unavailable rather than as fake zero activity.
-      - name: Record the state-persistence outcome
-        if: always()
-        env:
-          CACHE_RESULT: ${{ env.CACHE_RESULT }}
-        run: |
-          python - <<'PY'
-          import json, os
-          path = os.environ.get("RUN_PERSISTENCE_PATH") or os.path.join(
-              os.environ.get("RUNNER_TEMP", "."), "persistence.json")
-          result = (os.environ.get("CACHE_RESULT") or "").strip()
-          if result == "success":
-              states = {"local_save": "success", "commit": "unchanged-or-committed",
-                        "push": os.environ.get("CACHE_PUSHED", "pushed")}
-          elif result == "failed":
-              states = {"local_save": "success", "commit": "failed", "push": "failed"}
-          else:
-              states = {"local_save": "unavailable", "commit": "not-run",
-                        "push": "not-run"}
-          with open(path, "w", encoding="utf-8") as handle:
-              json.dump(states, handle, indent=2, sort_keys=True)
-          print("persistence record:", states)
-          PY
-
-      # Reporting only. Reads the structured run report and the persistence
-      # record; makes NO additional requests, mutates no state and posts
-      # nothing. Runs after persistence, in always(), so the final state-push
-      # status is reported even when setup or the application failed.
       - name: Write monitor run summary
         if: always()
         env:
-          RUN_WORKFLOW_NAME: Reddit Feed Monitor
-          RUN_JOB_STATUS: ${{ job.status }}
+          RUN_REPORT_PATH: ${{ env.RUN_REPORT_PATH }}
+          PERSISTENCE_REPORT_PATH: ${{ env.PERSISTENCE_REPORT_PATH }}
         run: |
-          python .github/scripts/render_run_summary.py \
-            --report "${RUN_REPORT_PATH:-$RUNNER_TEMP/run-report.json}" \
-            --persistence "${RUN_PERSISTENCE_PATH:-$RUNNER_TEMP/persistence.json}" \
-            --output "$GITHUB_STEP_SUMMARY"
+          python .github/scripts/render_run_summary.py --report "${RUN_REPORT_PATH:-}" --persistence "${PERSISTENCE_REPORT_PATH:-}"

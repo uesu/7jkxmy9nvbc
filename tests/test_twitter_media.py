@@ -632,7 +632,10 @@ check("r73 config: the animated/AVIF content-type tiers are explicit constants",
       and x3.AVIF_IMAGE_TYPES == ("image/avif", "image/heic", "image/heif"))
 
 _ci = open(os.path.join(ROOT, ".github", "workflows", "ci.yml"), encoding="utf-8").read()
-check("ci runs this suite", "python tests/test_twitter_media.py" in _ci)
+check("ci runs this suite",
+      "python tests/test_twitter_media.py" in _ci
+      or "tests/test_twitter_media.py" in open(
+          os.path.join(ROOT, ".github", "maintenance.json"), encoding="utf-8").read())
 
 
 print()

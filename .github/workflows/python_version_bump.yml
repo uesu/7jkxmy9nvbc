@@ -1,239 +1,252 @@
-#  Automatic CPython runtime proposer — thin selection / validation / publish
-#  stages only. Every policy rule lives in .github/scripts/maintenance.py, which
-#  is shared verbatim with the News development repository and the other News
-#  production repository; the inline version-selection program that used to be
-#  duplicated here is gone.
+# Automatic CPython pin proposer. Policy lives in .github/scripts/maintenance.py.
+# This workflow selects, validates, and publishes a PR. It never self-merges;
+# ordinary PR CI plus maintenance_merge.yml decide on the actual latest head.
 #
-#  WHAT CHANGED FROM THE PREVIOUS VERSION
-#    * The exact pin is read from .python-version (the single runtime source of
-#      truth), not scraped out of a workflow file.
-#    * No README/doc rewrite: production copies ship no development Markdown,
-#      and absent optional docs are NOT an error. The only runtime file this
-#      workflow rewrites is .python-version.
-#    * NO SELF-MERGE. The proposer publishes one deterministic proposal and
-#      stops; ordinary PR CI plus .github/workflows/maintenance_merge.yml decide
-#      on the actual latest PR head. A successful pre-PR test is useful but is
-#      not a substitute for final-head validation.
-#    * A missing release date no longer bypasses the soak: it reports
-#      `deferred: release-date-unavailable`, which is distinct from `up-to-date`.
-#
-#  SCOPE: at most the newest patch of the current series, or the next minor
-#  after the configured soak — and a minor always stays on the human-review
-#  path. A major migration is never routine. There is deliberately no `all`
-#  auto-merge mode.
-#
-#  AUTHENTICATION: secrets.BUMP_PAT is exposed to the publish step ONLY.
-#  Selection and validation run with no write credentials at all. A missing
-#  token is an explicit configuration error, never a fallback to a token whose
-#  events would silently suppress normal PR CI.
+# BUMP_PAT is isolated to the publish step. Missing credentials are a
+# configuration error, not a fallback to GITHUB_TOKEN (which can suppress
+# normal pull_request CI).
 
 name: Python version bump (auto)
 
 on:
   schedule:
-    # Mondays 06:00 UTC. This is the maintenance schedule; it never runs a
-    # monitor. cron-job.org remains the single monitor scheduler.
     - cron: '0 6 * * 1'
   workflow_dispatch:
     inputs:
       force_version:
-        description: 'Propose this exact version instead of auto-detecting (optional; a non-patch override stays review-required)'
+        description: 'Bump to this exact version instead of auto-detecting (optional)'
         required: false
         default: ''
       ignore_soak:
-        description: 'Skip the soak period for a new minor series (the minor still requires human review)'
+        description: 'Skip the soak period for a new minor series'
         required: false
         type: boolean
         default: false
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: python-bump-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  CHECKOUT_SHA: 3d3c42e5aac5ba805825da76410c181273ba90b1  # actions/checkout v7
-  SETUP_PYTHON_SHA: 5fda3b95a4ea91299a34e894583c3862153e4b97  # actions/setup-python v7
-
 jobs:
-  # ---- 1. selection: secret-free, read-only ------------------------------
   select:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       status: ${{ steps.resolve.outputs.status }}
-      reason: ${{ steps.resolve.outputs.reason }}
+      current: ${{ steps.resolve.outputs.current }}
       candidate: ${{ steps.resolve.outputs.candidate }}
       kind: ${{ steps.resolve.outputs.kind }}
-      current: ${{ steps.resolve.outputs.current }}
+      reason: ${{ steps.resolve.outputs.reason }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
         with:
           persist-credentials: false
 
-      - name: Set up Python (exact pin from .python-version)
+      - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
         with:
-          python-version-file: '.python-version'
+          python-version-file: .python-version
 
-      - name: Select the next candidate
+      - name: Select a candidate from the setup-python manifest
         id: resolve
         env:
+          FORCE_VERSION: ${{ inputs.force_version }}
+          IGNORE_SOAK: ${{ inputs.ignore_soak }}
           SOAK_DAYS: ${{ vars.PYTHON_BUMP_SOAK_DAYS }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          args=(resolve --force-version "${{ inputs.force_version }}")
-          [ "${{ inputs.ignore_soak }}" = "true" ] && args+=(--ignore-soak)
-          [ -n "$SOAK_DAYS" ] && args+=(--soak-days "$SOAK_DAYS")
-          python .github/scripts/python_version_bump.py "${args[@]}" | tee selection.txt
-          # Re-emit the adapter's outputs for this job.
+          curl -fsSL -o manifest.json \
+            https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
+          ARGS=(--manifest manifest.json)
+          if [ -n "${FORCE_VERSION:-}" ]; then ARGS+=(--force "$FORCE_VERSION"); fi
+          if [ "${IGNORE_SOAK:-}" = "true" ]; then ARGS+=(--ignore-soak); fi
+          if [ -n "${SOAK_DAYS:-}" ]; then ARGS+=(--soak-days "$SOAK_DAYS"); fi
+          python .github/scripts/python_version_bump.py "${ARGS[@]}" | tee selection.json
           python - <<'PY'
-          import os, re
+          import json, os
+          data = json.load(open("selection.json", encoding="utf-8"))
           out = os.environ["GITHUB_OUTPUT"]
-          with open("selection.txt", encoding="utf-8") as fh:
-              text = fh.read()
-          # The adapter prints a JSON decision block then key=value lines.
-          for line in text.splitlines():
-              if re.fullmatch(r"(status|reason|candidate|kind|current|bump)=.*", line):
-                  with open(out, "a", encoding="utf-8") as sink:
-                      sink.write(line + "\n")
+          def w(k, v):
+              with open(out, "a", encoding="utf-8") as fh:
+                  fh.write(f"{k}={v}\n")
+          w("status", data.get("status") or "failed")
+          w("current", data.get("current") or "")
+          w("candidate", data.get("candidate") or "")
+          w("kind", data.get("kind") or "")
+          w("reason", data.get("reason") or "")
           PY
 
-      - name: Report the decision
-        if: always()
-        run: |
-          {
-            echo "## Runtime proposer"
-            echo
-            echo "- status: \`${{ steps.resolve.outputs.status }}\`"
-            echo "- reason: \`${{ steps.resolve.outputs.reason }}\`"
-            echo "- current: \`${{ steps.resolve.outputs.current }}\`"
-            echo "- candidate: \`${{ steps.resolve.outputs.candidate }}\`"
-            echo "- kind: \`${{ steps.resolve.outputs.kind }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---- 2. candidate validation: secret-free, PR code never runs ----------
   validate:
     needs: select
-    if: needs.select.outputs.status == 'proposed'
+    if: needs.select.outputs.status == 'proposed' || needs.select.outputs.status == 'review-required'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      wheels: ${{ steps.wheels.outputs.ok }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
         with:
           persist-credentials: false
 
-      - name: Install the exact candidate interpreter
+      - name: Install the candidate interpreter
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
         with:
           python-version: ${{ needs.select.outputs.candidate }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-      - name: The running interpreter must equal the candidate exactly
+      - name: Assert the interpreter equals the candidate
         run: |
-          set -euo pipefail
-          actual="$(python -c 'import sys;print("%d.%d.%d" % sys.version_info[:3])')"
-          expected="${{ needs.select.outputs.candidate }}"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::interpreter is $actual, expected $expected"
-            exit 1
-          fi
-          echo "interpreter confirmed: $actual"
+          python - <<'PY'
+          import sys
+          expected = "${{ needs.select.outputs.candidate }}".strip()
+          actual = ".".join(str(p) for p in sys.version_info[:3])
+          if actual != expected:
+              raise SystemExit(f"interpreter {actual} != candidate {expected}")
+          print("interpreter", actual)
+          PY
 
-      # --only-binary=:all: is the load-bearing flag: aiohttp, multidict, yarl,
-      # frozenlist and propcache are C extensions built per interpreter ABI, so
-      # a brand-new CPython minor without wheels must DEFER, not compile.
-      - name: Prebuilt wheels must exist for the committed frozen graph
+      - name: Frozen wheels-only install
+        id: wheels
         run: |
+          set +e
           python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
-          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+            echo "::notice::No prebuilt wheels yet for $(python --version) — deferring this bump."
+            exit 0
+          fi
+          echo "ok=yes" >> "$GITHUB_OUTPUT"
 
-      - name: Rewrite ONLY the runtime pin, then re-run the same CI adapter
+      - name: Validate the candidate tree
+        if: steps.wheels.outputs.ok == 'yes'
         run: |
-          set -euo pipefail
-          printf '%s\n' "${{ needs.select.outputs.candidate }}" > .python-version
-          git --no-pager diff --stat
-          changed="$(git --no-pager diff --name-only)"
-          if [ "$changed" != ".python-version" ]; then
-            echo "::error::unexpected files changed: $changed"
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+          python .github/scripts/ci.py --profile production --group application
+          python .github/scripts/ci.py --profile production --group maintenance
+
+      - name: Rewrite only the documented runtime pin
+        if: steps.wheels.outputs.ok == 'yes'
+        run: |
+          python .github/scripts/python_version_bump.py --write-pin --candidate "${{ needs.select.outputs.candidate }}"
+          if git diff --name-only -- docs/history/ | grep -q .; then
+            echo "::error::Historical files changed by runtime rewrite"
             exit 1
           fi
-          python .github/scripts/ci.py --profile production
+          UNEXPECTED="$(git diff --name-only | grep -v '^\.python-version$' || true)"
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::Unexpected file changed:"
+            printf '%s\n' "$UNEXPECTED"
+            exit 1
+          fi
 
-  # ---- 3. publish: the ONLY step that sees BUMP_PAT ----------------------
+      - name: Re-validate after the pin rewrite
+        if: steps.wheels.outputs.ok == 'yes'
+        run: |
+          python .github/scripts/ci.py --profile production --group application
+          python .github/scripts/ci.py --profile production --group maintenance
+
   publish:
     needs: [select, validate]
-    if: needs.select.outputs.status == 'proposed'
+    if: >-
+      needs.validate.outputs.wheels == 'yes' &&
+      (needs.select.outputs.status == 'proposed' || needs.select.outputs.status == 'review-required')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - name: Check out repository with the publisher token
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
-        with:
-          token: ${{ secrets.BUMP_PAT }}
-
-      - name: Set up Python (exact pin from .python-version)
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
-        with:
-          python-version-file: '.python-version'
-
-      - name: Validate the candidate for publication
+      - name: Require BUMP_PAT
         env:
           BUMP_PAT: ${{ secrets.BUMP_PAT }}
         run: |
-          set -euo pipefail
-          if [ -z "${BUMP_PAT:-}" ]; then
-            echo "::error::BUMP_PAT is not configured; refusing to fall back to a token whose events suppress PR CI."
+          if [ -z "${BUMP_PAT}" ]; then
+            echo "::error::BUMP_PAT is missing — configuration error, not a GITHUB_TOKEN fallback."
             exit 1
           fi
-          python .github/scripts/python_version_bump.py publish \
-            --candidate "${{ needs.select.outputs.candidate }}"
 
-      - name: Publish one deterministic proposal per candidate
+      - name: Check out with the publisher token
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
+        with:
+          token: ${{ secrets.BUMP_PAT }}
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
+        with:
+          python-version-file: .python-version
+
+      - name: Apply the validated pin and open or update the proposal
         env:
           GH_TOKEN: ${{ secrets.BUMP_PAT }}
-          CANDIDATE: ${{ needs.select.outputs.candidate }}
           CURRENT: ${{ needs.select.outputs.current }}
+          LATEST: ${{ needs.select.outputs.candidate }}
           KIND: ${{ needs.select.outputs.kind }}
+          STATUS: ${{ needs.select.outputs.status }}
         run: |
           set -euo pipefail
-          branch="chore/python-${CANDIDATE}"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git fetch origin "$branch" 2>/dev/null && git checkout "$branch" || git checkout -b "$branch"
-          printf '%s\n' "$CANDIDATE" > .python-version
-          if git diff --quiet && git diff --cached --quiet && git rev-parse --verify "origin/$branch" >/dev/null 2>&1; then
-            echo "An identical proposal already exists for $CANDIDATE — no new PR."
+          python .github/scripts/python_version_bump.py --write-pin --candidate "$LATEST"
+          BRANCH="chore/python-${LATEST}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          if git diff --quiet -- .python-version; then
+            echo "Empty pin diff — no PR."
             exit 0
           fi
           git add .python-version
-          if git diff --cached --quiet; then
-            echo "Empty diff: .python-version already pins $CANDIDATE — no PR."
-            exit 0
-          fi
-          git commit -m "chore: bump CPython pin $CURRENT -> $CANDIDATE ($KIND)"
-          git push --force-with-lease origin "$branch"
-          body="$(cat <<EOF
-          Automated runtime proposal ($KIND): \`$CURRENT\` -> \`$CANDIDATE\`.
+          git commit -m "chore: bump CPython pin ${CURRENT} -> ${LATEST}"
+          git push --force-with-lease origin "$BRANCH"
+          BODY=$(cat <<EOF
+          Automated ${KIND} proposal for the pinned CPython runtime (\`.python-version\`).
 
-          - Only \`.python-version\` changes.
-          - Validated on the candidate interpreter with prebuilt wheels only,
-            then re-validated on the rewritten tree by the shared CI adapter.
-          - This PR is NOT self-merged. Ordinary PR CI and
-            \`.github/workflows/maintenance_merge.yml\` decide on the final head.
+          | | |
+          |---|---|
+          | From | \`${CURRENT}\` |
+          | To | \`${LATEST}\` |
+          | Kind | ${KIND} |
+          | Selection | ${STATUS} |
+
+          Pre-PR validation ran under \`${LATEST}\` with the frozen hashed graph
+          (\`pip install --require-hashes --only-binary=:all:\`) and the CI adapter
+          (\`ci.py --profile production\`). Ordinary PR CI on this head is still
+          required; this workflow does not merge.
           EOF
-          )"
-          if gh pr view "$branch" --json number >/dev/null 2>&1; then
-            echo "Proposal PR for $branch already exists; updated in place."
+          )
+          EXISTING="$(gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number' || true)"
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --title "chore: bump CPython pin ${CURRENT} -> ${LATEST} (${KIND})" --body "$BODY"
           else
-            gh pr create --base main --head "$branch" \
-              --title "chore: bump CPython pin $CURRENT -> $CANDIDATE ($KIND)" \
-              --body "$body" --label dependencies
+            gh pr create --base main --head "$BRANCH" \
+              --title "chore: bump CPython pin ${CURRENT} -> ${LATEST} (${KIND})" \
+              --body "$BODY"
           fi
+
+  summary:
+    if: always()
+    needs: [select, validate, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write job summary
+        run: |
+          {
+            echo "### Python version bump"
+            echo ""
+            echo "* current pin: \`${{ needs.select.outputs.current }}\`"
+            echo "* candidate: \`${{ needs.select.outputs.candidate || 'none' }}\`"
+            echo "* status: \`${{ needs.select.outputs.status }}\`"
+            echo "* reason: \`${{ needs.select.outputs.reason }}\`"
+            echo "* kind: \`${{ needs.select.outputs.kind || 'n/a' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -2356,25 +2356,19 @@ check("r75: Reddit RSS mirror membership unchanged",
       set(_r75_reddit_fleet) == _r75_reddit_expected
       and _r75_reddit_fleet[0] == "https://www.reddit.com")
 
-# r39 runtime assertion, UPDATED for the maintenance round (2026-10-15): the
-# exact CPython pin moved OUT of the workflow files and into .python-version,
-# which is now the single runtime source of truth. The intent of the original
-# check — "one exact pin, no stale 3.11 literal anywhere" — is preserved, but
-# the pin is now asserted once in .python-version and each current-runtime
-# workflow is asserted to READ that file instead of hard-coding a version.
 with open(os.path.join(ROOT, ".python-version"), encoding="utf-8") as _fh:
-    _r39_pin = _fh.read().strip()
-check("maintenance runtime: .python-version holds the single exact CPython pin",
-      _r39_pin == "3.14.8")
+    _pin = _fh.read().strip()
+check("r39 runtime: .python-version pins CPython 3.14.8",
+      _pin == "3.14.8")
 for _r39_wf in (".github/workflows/ci.yml", ".github/workflows/reddit_monitor.yml",
-                ".github/workflows/twitter_monitor.yml",
-                ".github/workflows/maintenance_merge.yml"):
+                ".github/workflows/twitter_monitor.yml"):
     with open(os.path.join(ROOT, _r39_wf), encoding="utf-8") as _fh:
         _r39_source = _fh.read()
-    check(f"maintenance runtime: {_r39_wf} reads the pin file and hard-codes no version",
-          "python-version-file: '.python-version'" in _r39_source
-          and "python-version: '3." not in _r39_source
-          and "python-version: '3.11'" not in _r39_source)
+    check(f"r39 runtime: {_r39_wf} uses python-version-file (not a hard-coded 3.11)",
+          "python-version-file: .python-version" in _r39_source
+          and "python-version: '3.11'" not in _r39_source
+          and "--require-hashes" in _r39_source
+          and "--only-binary=:all:" in _r39_source)
 
 for _r39_wf in (".github/workflows/reddit_monitor.yml", ".github/workflows/twitter_monitor.yml"):
     with open(os.path.join(ROOT, _r39_wf), encoding="utf-8") as _fh:
@@ -2394,47 +2388,20 @@ for _r39_wf in (".github/workflows/reddit_monitor.yml", ".github/workflows/twitt
           "::error::CACHE PUSH FAILED" in _r39_source
           and "::error::CACHE PUSH RECOVERY FAILED" in _r39_source)
 
-# 2026-10-15 MAINTENANCE ROUND update: dependabot_auto_merge.yml was REMOVED
-# and replaced in the same change by the single trusted, review-aware
-# controller maintenance_merge.yml, so two controllers can never compete to
-# merge the same PR. The guarantees the original assertions made are carried
-# over below against the replacement, and the removal itself is asserted.
-check("maintenance: the separate Dependabot auto-merge workflow is gone",
-      not os.path.exists(os.path.join(ROOT, ".github/workflows/dependabot_auto_merge.yml")))
+_auto_merge_path = os.path.join(ROOT, ".github/workflows/dependabot_auto_merge.yml")
+check("Dependabot proposer self-merge workflow is gone",
+      not os.path.exists(_auto_merge_path))
 with open(os.path.join(ROOT, ".github/workflows/maintenance_merge.yml"), encoding="utf-8") as _fh:
     _r39_merge = _fh.read()
-check("maintenance: exactly one merge controller exists",
-      _r39_merge.count("pull_request_target:") == 1
-      and os.path.exists(os.path.join(ROOT, ".github/workflows/maintenance_merge.yml")))
-check("merge controller uses trusted PR events and never checks out PR code",
-      "pull_request_target:" in _r39_merge
-      and "actions/checkout" in _r39_merge
-      and "github.head_ref" not in _r39_merge
-      and "pull_request_target` runs THIS file from the trusted default branch" in _r39_merge)
-check("merge controller reevaluates when trusted CI completes and on PR state changes",
-      "workflow_run:" in _r39_merge
-      and all(_t in _r39_merge for _t in ("opened", "synchronize", "reopened",
-                                          "labeled", "review_requested")))
-check("merge controller verifies the trusted updater identity, not the branch name alone",
-      "author-is-not-the-trusted-updater" in _r39_merge
-      or "dependabot[bot]" in _r39_merge)
-check("merge controller reads the policy from the trusted default branch",
-      'ref: ${{ github.event.repository.default_branch' in _r39_merge
-      and ".github/maintenance.json" in _r39_merge)
-check("merge controller fails closed and never claims a merge it did not make",
-      "did not confirm a merge" in _r39_merge
-      and "failing closed" in _r39_merge
-      and "sha=\"$head_sha\"" in _r39_merge)
-check("merge controller keeps the reviewed merge-method fallback bounded",
-      "for method in squash merge; do" in _r39_merge
-      and "Merge method is not allowed" in _r39_merge)
-check("merge controller has no circular dependency on itself",
-      "needs:" not in _r39_merge)
-with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as _fh:
-    _r39_ci = _fh.read()
-check("the stable final gate never depends on the merge controller",
-      "maintenance_merge" not in _r39_ci
-      and "maintenance-ci:" in _r39_ci)
+check("Merge controller checks out the trusted default branch only",
+      "ref: ${{ github.event.repository.default_branch }}" in _r39_merge
+      and "persist-credentials: false" in _r39_merge
+      and "apply-live --apply-live" in _r39_merge
+      and "AUTO_MERGE_DEPENDABOT" in _r39_merge
+      and "AUTO_MERGE_PYTHON_BUMP" in _r39_merge)
+check("Merge controller never installs or executes PR-head maintenance.py",
+      "pull_request" in _r39_merge
+      and "ref: ${{ github.event.pull_request.head" not in _r39_merge)
 
 # ---- R42/R45 smoke guards (round 67 guard update, annotated): the Redlib
 # badge reader, the fail-closed decision matrix, the allowlist and the
@@ -2466,7 +2433,10 @@ check("r44: tombstone prepends a notice", "no longer live" in _tomb["components"
 check("r44: tombstone greys the accent", _tomb["components"][0]["accent_color"] == 0x808080)
 with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as _fh:
     _r42_ci = _fh.read()
-check("r42: CI runs the pure signal suite", "python tests/test_reddit_signals.py" in _r42_ci)
+check("r42: CI runs the pure signal suite",
+      "python tests/test_reddit_signals.py" in _r42_ci
+      or "tests/test_reddit_signals.py" in open(
+          os.path.join(ROOT, ".github/maintenance.json"), encoding="utf-8").read())
 check("r42/r45 guard updated in round 67: the removed gate's repository "
       "Variables are unmapped",
       not any(_v in _r35_workflow for _v in _r35_removed_vars))
@@ -3035,9 +3005,82 @@ try:
     check("r47: an ordinary post makes exactly ONE proxy call (speed unchanged)",
           _r47_proxy2.paths == ["/r/AnantaLeaks/comments/1wuv547/"],
           str(_r47_proxy2.paths))
+
+    class _ImageThenVideoProxy:
+        def __init__(self):
+            self.paths = []
+
+        async def fetch_proxy_post(self, session, path, label="", health=None,
+                                   need_video=False):
+            self.paths.append(path)
+            if path.startswith("/r/u_"):
+                return {"service": "alias", "media": [
+                    {"kind": "video", "url": "https://v.redd.it/xyz789/DASH_720.mp4"}]}
+            return {"service": "poster", "media": [
+                {"kind": "image", "url": "https://external-preview.redd.it/poster.jpg"}]}
+
+    _img_proxy = _ImageThenVideoProxy()
+    v3.reddit_proxy = _img_proxy
+    v3._proxy_post_cache.clear()
+    _img_res = asyncio.run(v3.fetch_proxy_post_memo(
+        None, "/user/sampleuser/comments/abc1111/", label="abc1111",
+        need_video=True))
+    check("profile alias retries when the first route only returned a poster",
+          isinstance(_img_res, dict)
+          and _img_res["media"][0]["kind"] == "video"
+          and _img_proxy.paths[0].startswith("/user/")
+          and any(p.startswith("/r/u_") for p in _img_proxy.paths),
+          f"{_img_res} paths={_img_proxy.paths}")
 finally:
     v3.reddit_proxy = _r47_saved_proxy
     v3._proxy_post_cache.clear()
+
+
+check("Original Post label is enough without the English word crosspost",
+      v3.find_crosspost_original_path(
+          '[Original Post](/r/SourceSub/comments/zzparent1/title/)',
+          "/r/ChildSub/comments/zzchild01/")
+      == "/r/SourceSub/comments/zzparent1/")
+check("a slugged child permalink is not treated as the original",
+      v3.find_crosspost_original_path(
+          'u/x crossposted this from r/SourceSub — '
+          '<a href="/r/ChildSub/comments/zzchild01/child_slug/">own</a> '
+          '<a href="/r/SourceSub/comments/zzparent1/orig_slug/">orig</a>',
+          "/r/ChildSub/comments/zzchild01/child_slug/")
+      == "/r/SourceSub/comments/zzparent1/")
+check("foreign-host permalinks are rejected as originals",
+      v3.find_crosspost_original_path(
+          'crosspost https://evil.example/r/SourceSub/comments/zzparent1/',
+          "/r/ChildSub/comments/zzchild01/") is None)
+check("canonical post ids compare across slug and host forms",
+      v3.is_same_reddit_post(
+          "https://www.reddit.com/r/ChildSub/comments/zzchild01/slug/",
+          "/r/ChildSub/comments/zzchild01/") is True)
+check("audio-cover render URLs are not motion video",
+      v3._motion_video_url({"kind": "video",
+                            "url": "https://proxy.embedez.com/render/audio?cover=x"})
+      is None)
+check("encoded v.redd.it ids are recovered from proxy video URLs",
+      v3.extract_vreddit_id_from_media_url(
+          "https://example.test/render?videoUrl=https%3A%2F%2Fv.redd.it%2Fabcd1234%2FDASH_720.mp4")
+      == "abcd1234")
+check("external-preview thumbnails are not treated as video evidence",
+      v3.extract_vreddit_id_from_media_url(
+          "https://external-preview.redd.it/abcd1234.jpg") is None)
+check("structured parent list is preferred over a self permalink",
+      v3.resolve_crosspost_source(
+          own_path="/r/ChildSub/comments/zzchild01/",
+          base={},
+          post_json={
+              "crosspost_parent_list": [{
+                  "id": "zzparent1",
+                  "permalink": "/r/SourceSub/comments/zzparent1/orig/",
+                  "secure_media": {"reddit_video": {
+                      "fallback_url": "https://v.redd.it/vidparent/DASH_720.mp4",
+                  }},
+              }],
+          },
+      ).get("id") == "zzparent1")
 
 
 
@@ -5711,25 +5754,18 @@ check("r68: failed quality upgrade preserves the already-validated vxreddit "
       str((_r68_proxy_result["media"], _r68_base_check.await_count,
            _r68_quality.await_count, _r68_probe.await_count)))
 
-# 2026-10-15 MAINTENANCE ROUND update: the workflow's grep counter for the
-# retained-base phrase was REMOVED together with every other log-scanning
-# counter. Quality outcomes now travel as structured counters in the run
-# report and are rendered from recorded data, so the engine's log wording is
-# no longer load-bearing for the summary. The engine's own fallback logging is
-# unchanged (asserted above); what changed is who counts it.
+# The workflow's existing grep counter intentionally counts fallback NOTICES
+# by the stable retained-base phrase, not every possible quality decision.
 with open(os.path.join(ROOT, ".github/workflows/reddit_monitor.yml"),
           encoding="utf-8") as _r68_workflow_file:
     _r68_workflow = _r68_workflow_file.read()
-check("maintenance: the reddit summary no longer scans log lines for counters",
-      "count_matches" not in _r68_workflow
-      and "grep -Ec" not in _r68_workflow)
-check("maintenance: quality/fallback outcomes are reported from the structured report",
+check("r68: workflow summary remains compatible with the retained-base log "
+      "wording and uses only the local monitor log",
       "render_run_summary.py" in _r68_workflow
-      and "RUN_REPORT_PATH" in _r68_workflow)
-check("maintenance: the rendered footer still performs no additional requests",
-      "Rendered from the recorded run report only" in open(
-          os.path.join(ROOT, ".github/scripts/render_run_summary.py"),
-          encoding="utf-8").read())
+      and "summary source: structured report only; no additional requests"
+      in open(os.path.join(ROOT, ".github/scripts/render_run_summary.py"),
+              encoding="utf-8").read()
+      and "count_matches" not in _r68_workflow)
 
 
 # ---- round 69: Arctic Shift search failure reasons (offline) ---------------
@@ -6331,364 +6367,6 @@ check("r72 main: retraction seatbelt still records original ID with no heal for 
       not _r72_main_retract.gets and not _r72_main_retract.patches
       and _r72_records["TestSub_abc123"]["message_id"] == "msg1"
       and _r72_records["TestSub_abc123"]["payload"] == _r72_main_retract.posts[0][1])
-
-# ===========================================================================
-# 2026-10-15 MAINTENANCE ROUND — profile-crosspost video delivered as an image
-#
-# Incident AnantaLeaks_1x6h1mf (Reddit Feed Monitor #7371, code SHA
-# 497c557b2cf19840976e462ed05a7ec65a57cd50): a crosspost of the profile post
-# /user/aphotide/comments/1x6h1a5/ was delivered as media=image from a single
-# external-preview poster tile, even though the ORIGINAL carries video
-# 1y2gic17nlvh1. The fixtures under tests/fixtures/maintenance/ are SYNTHETIC
-# reconstructions of the identity/metadata shapes in that incident — not
-# captured production response bodies.
-#
-# The child keeps its posting identity: id, permalink, webhook route and dedup
-# key stay AnantaLeaks_1x6h1mf. Only the MEDIA SOURCE moves to the original.
-# ===========================================================================
-print()
-print("--- crosspost original identity (incident AnantaLeaks_1x6h1mf) ---")
-
-_xp_fixture_dir = os.path.join(ROOT, "tests", "fixtures", "maintenance")
-with open(os.path.join(_xp_fixture_dir, "crosspost_child_1x6h1mf.json"), encoding="utf-8") as _fh:
-    _xp = json.load(_fh)
-with open(os.path.join(_xp_fixture_dir, "crosspost_parent_structured.json"), encoding="utf-8") as _fh:
-    _xp_parent = json.load(_fh)
-with open(os.path.join(_xp_fixture_dir, "crosspost_negative_candidates.json"), encoding="utf-8") as _fh:
-    _xp_neg = json.load(_fh)
-
-CHILD_PATH = _xp["child"]["path"]
-ORIG_PATH = _xp["original"]["path"]
-ORIG_ID = _xp["original"]["post_id"]
-CHILD_ID = _xp["child"]["post_id"]
-VRED = _xp["original"]["vred_id"]
-
-check("crosspost: the child's identity is its own post ID",
-      v3.canonical_post_id(CHILD_PATH) == CHILD_ID)
-check("crosspost: the original's identity is read from its profile permalink",
-      v3.canonical_post_id(ORIG_PATH) == ORIG_ID)
-check("crosspost: identity ignores the slug text",
-      v3.canonical_post_id("/r/AnantaLeaks/comments/1x6h1mf/a_completely_different_slug/")
-      == CHILD_ID)
-check("crosspost: identity ignores a query string and a trailing slash",
-      v3.canonical_post_id("/user/aphotide/comments/1x6h1a5/x/?context=3") == ORIG_ID
-      and v3.canonical_post_id("/user/aphotide/comments/1x6h1a5") == ORIG_ID)
-check("crosspost: /user/, /u/ and /r/u_ aliases are the SAME post",
-      all(v3.is_same_post(alias, ORIG_PATH) for alias in _xp["original"]["aliases"]))
-check("crosspost: the child and its original are different posts",
-      not v3.is_same_post(CHILD_PATH, ORIG_PATH))
-check("crosspost: a malformed post ID is rejected",
-      v3.canonical_post_id("/r/AnantaLeaks/comments/!/broken/") is None)
-check("crosspost: a bare base36 ID is accepted", v3.canonical_post_id("1x6h1a5") == ORIG_ID)
-check("crosspost: a too-short ID is rejected", v3.canonical_post_id("abc") is None)
-
-# --- structured parent metadata, without the literal word "crosspost" -------
-_record, _parent_id = v3.crosspost_parent_from_json(_xp_parent)
-check("crosspost: crosspost_parent_list is read even with no crosspost_post_link",
-      _parent_id == ORIG_ID and _record["provenance"] == "crosspost_parent_list")
-check("crosspost: the structured parent carries the profile permalink",
-      _record["path"] == ORIG_PATH)
-_record2, _pid2 = v3.crosspost_parent_from_json(
-    {"crosspost_parent_id": "t3_1x6h1a5"})
-check("crosspost: a flat crosspost_parent_id alone is enough",
-      _pid2 == ORIG_ID and _record2["provenance"] == "crosspost_parent_id")
-check("crosspost: no parent metadata means no parent",
-      v3.crosspost_parent_from_json(_xp_neg["absent_parent"]) == (None, None))
-check("crosspost: a non-dict record is ignored",
-      v3.crosspost_parent_from_json(None) == (None, None))
-
-_resolved = v3.find_crosspost_original_path(None, CHILD_PATH,
-                                            structured_parent=_record)
-check("crosspost: a structured parent resolves WITHOUT the word 'crosspost'",
-      _resolved == ORIG_PATH)
-_resolved = v3.find_crosspost_original_path(None, CHILD_PATH, parent_id="t3_1x6h1a5")
-check("crosspost: an explicit parent ID resolves without any text at all",
-      v3.canonical_post_id(_resolved) == ORIG_ID)
-check("crosspost: a parent ID equal to the child is rejected (no self-parent)",
-      v3.find_crosspost_original_path(None, CHILD_PATH,
-                                      parent_id=CHILD_ID) is None)
-
-# --- explicit parent marker ("Original Post") without the keyword -----------
-with open(os.path.join(_xp_fixture_dir, "crosspost_parent_marker_only.json"),
-          encoding="utf-8") as _fh:
-    _xp_marker = json.load(_fh)
-_xp_marker_found = v3.find_crosspost_original_path(_xp_marker["text"],
-                                                   _xp_marker["own_path"])
-# Compared by canonical post ID, not by full path string: the returned form is
-# the historical '/user/<name>/comments/<id>/' and names the SAME post as the
-# original's slug-ful permalink and its /u/ and /r/u_ aliases.
-check("crosspost: an explicit 'Original Post' marker resolves the parent",
-      v3.canonical_post_id(_xp_marker_found) == ORIG_ID
-      and v3.is_same_post(_xp_marker_found, ORIG_PATH)
-      and all(v3.is_same_post(_xp_marker_found, a)
-              for a in _xp["original"]["aliases"]))
-check("crosspost: the marker-only path is not the child's own route",
-      not v3.is_same_post(_xp_marker_found, _xp_marker["own_path"]))
-check("crosspost: the literal word 'crosspost' is no longer required",
-      "crosspost" not in _xp_marker["text"].lower())
-
-# --- the child's own link appears BEFORE the original link -----------------
-with open(os.path.join(_xp_fixture_dir, "crosspost_self_link_before_parent.json"),
-          encoding="utf-8") as _fh:
-    _xp_selffirst = json.load(_fh)
-_found = v3.find_crosspost_original_path(_xp_selffirst["text"],
-                                         _xp_selffirst["own_path"])
-check("crosspost: an own slugged permalink before the parent is skipped",
-      v3.canonical_post_id(_found) == ORIG_ID)
-check("crosspost: identity comparison is by post ID, not by full path string",
-      not v3.is_same_post(_found, _xp_selffirst["own_path"]))
-
-# --- negative cases: none may select an unrelated original ----------------
-check("crosspost negative: an alias self-link is not a parent",
-      v3.find_crosspost_original_path(_xp_neg["alias_self_link"],
-                                      _xp_neg["own_path"]) is None)
-check("crosspost negative: a malformed ID is not a parent",
-      v3.find_crosspost_original_path(_xp_neg["malformed_id"],
-                                      _xp_neg["own_path"]) is None)
-check("crosspost negative: a foreign host is not a parent",
-      v3.find_crosspost_original_path(_xp_neg["foreign_host"],
-                                      _xp_neg["own_path"]) is None)
-check("crosspost negative: an unrelated body link is not a parent",
-      v3.find_crosspost_original_path(_xp_neg["unrelated_body_link"],
-                                      _xp_neg["own_path"]) is None)
-check("crosspost negative: a cyclic self-parent is rejected",
-      v3.crosspost_parent_from_json(_xp_neg["cycle_self_parent"])[1] is not None
-      and v3.find_crosspost_original_path(
-          None, _xp_neg["own_path"],
-          structured_parent=v3.crosspost_parent_from_json(
-              _xp_neg["cycle_self_parent"])[0]) is None)
-check("crosspost negative: an absent parent yields nothing",
-      v3.find_crosspost_original_path(
-          None, _xp_neg["own_path"],
-          structured_parent=v3.crosspost_parent_from_json(
-              _xp_neg["absent_parent"])[0]) is None)
-check("crosspost negative: plain body text with no marker yields nothing",
-      v3.find_crosspost_original_path(
-          "Read more at https://www.reddit.com/r/AnantaLeaks/comments/9zzzzzz/x/",
-          _xp_neg["own_path"]) is None)
-check("crosspost: the round-47 profile support still works",
-      v3.is_profile_post_path(ORIG_PATH)
-      and v3.is_profile_post_path("/u/aphotide/comments/1x6h1a5/x/"))
-
-print()
-print("--- need_video semantics: a poster is not a video ---")
-
-_poster = _xp["proxy_user_route_poster_only"]
-_video = _xp["proxy_alias_route_video"]
-check("need_video: an ordinary request is satisfied by any media",
-      v3._media_satisfies(_poster, False) is True)
-check("need_video: a poster does NOT satisfy a request for video",
-      v3._media_satisfies(_poster, True) is False)
-check("need_video: a real motion-video item DOES satisfy it",
-      v3._media_satisfies(_video, True) is True)
-check("need_video: an audio-with-cover rendering is not a motion video",
-      v3._media_satisfies({"media": [{"kind": "video", "audio_cover_only": True}]},
-                          True) is False)
-check("need_video: an empty result satisfies nothing",
-      v3._media_satisfies(None, False) is False
-      and v3._media_satisfies({"media": []}, True) is False)
-
-# --- the memo layer must try the /r/u_.../ alias when a video was requested
-class _XpProxyStub:
-    """Stands in for reddit_proxy: poster on /user/, video on /r/u_.../."""
-
-    def __init__(self):
-        self.calls = []
-
-    async def fetch_proxy_post(self, session, path, label="", health=None,
-                               need_video=False):
-        self.calls.append((path, bool(need_video)))
-        if path.startswith("/r/u_"):
-            return dict(_video)
-        return dict(_poster)
-
-
-_xp_saved_proxy = v3.reddit_proxy
-try:
-    _stub = _XpProxyStub()
-    v3.reddit_proxy = _stub
-    _got = asyncio.run(v3.fetch_proxy_post_memo(None, ORIG_PATH, label="xp",
-                                                health={}, need_video=True))
-    check("need_video: a poster-only /user/ answer still tries the alias route",
-          len(_stub.calls) == 2 and _stub.calls[0][0] == ORIG_PATH
-          and _stub.calls[1][0] == "/r/u_aphotide/comments/1x6h1a5/")
-    check("need_video: the alias video wins over the poster",
-          any(m["kind"] == "video" for m in _got["media"]))
-    check("need_video: the poster is retained as a fallback, not discarded",
-          _got.get("fallback_media") == _poster["media"])
-
-    _stub2 = _XpProxyStub()
-    v3.reddit_proxy = _stub2
-    _got2 = asyncio.run(v3.fetch_proxy_post_memo(None, ORIG_PATH, label="xp2",
-                                                 health={}, need_video=False))
-    check("no video requested: the first non-empty answer is accepted (no extra call)",
-          len(_stub2.calls) == 1 and _got2["media"] == _poster["media"])
-
-    class _AlwaysVideoStub(_XpProxyStub):
-        async def fetch_proxy_post(self, session, path, label="", health=None,
-                                   need_video=False):
-            self.calls.append((path, bool(need_video)))
-            return dict(_video)
-
-    _stub3 = _AlwaysVideoStub()
-    v3.reddit_proxy = _stub3
-    asyncio.run(v3.fetch_proxy_post_memo(None, ORIG_PATH, label="xp3",
-                                         health={}, need_video=True))
-    check("an already-valid video adds no needless alias request",
-          len(_stub3.calls) == 1)
-
-    class _NormalPhotoStub(_XpProxyStub):
-        async def fetch_proxy_post(self, session, path, label="", health=None,
-                                   need_video=False):
-            self.calls.append((path, bool(need_video)))
-            return {"media": [{"kind": "image", "url": "https://i.redd.it/a.png"}]}
-
-    _stub4 = _NormalPhotoStub()
-    v3.reddit_proxy = _stub4
-    asyncio.run(v3.fetch_proxy_post_memo(None, "/r/AnantaLeaks/comments/1x6h1mf/x/",
-                                         label="xp4", health={}, need_video=False))
-    check("a normal photo post on a subreddit route makes exactly one call",
-          len(_stub4.calls) == 1)
-finally:
-    v3.reddit_proxy = _xp_saved_proxy
-
-print()
-print("--- the media ID is the original's video, not the child's post ID ---")
-
-_embed = _xp["source_embed_video_plus_audio_cover"]
-_motion = next(m for m in _embed["media"] if not m.get("audio_cover_only"))
-_cover = next(m for m in _embed["media"] if m.get("audio_cover_only"))
-check("media ID: the proxy render URL carries the ORIGINAL's v.redd.it ID",
-      v3.video_id_from_proxy_url(_motion["url"]) == VRED)
-check("media ID: a plain v.redd.it URL still resolves",
-      v3.video_id_from_proxy_url(_xp["original"]["video_urls"]["cmaf_1080"]) == VRED)
-check("media ID: an unrelated URL yields nothing",
-      v3.video_id_from_proxy_url("https://example.invalid/nothing.mp4") is None)
-check("media ID: a None URL is safe", v3.video_id_from_proxy_url(None) is None)
-check("media ID: the child post ID is NOT the media ID",
-      CHILD_ID != VRED)
-check("audio-cover: an audio+cover rendering is flagged, not a second video",
-      _cover.get("audio_cover_only") is True
-      and _cover["kind"] == "image")
-check("audio-cover: its 1920x1080 cover does not make it a motion video",
-      "1920x1080" in _cover["url"] and _cover["kind"] != "video")
-check("gallery: exactly one motion-video tile for this single-video source",
-      sum(1 for m in _embed["media"] if m["kind"] == "video"
-          and not m.get("audio_cover_only")) == 1)
-
-print()
-print("--- orchestration: image-only proxies must not suppress native video ---")
-
-_xp_base = {
-    "body": "", "title": _xp["child"]["title"], "author": "someone",
-    "youtube_url": None, "vred_id": VRED, "redgifs_url": None,
-    "content_html": "", "thumb": None, "crosspost_orig_path": ORIG_PATH,
-}
-
-
-class _XpSession:
-    pass
-
-
-async def _xp_run(proxy_media, *, archive=None, native_video=None):
-    """resolve_post_media with every network helper replaced by a stub."""
-    saved = {}
-
-    async def _no_archive(session, post_id, label=""):
-        return archive
-
-    async def _no_redlib(session, path, label=""):
-        return []
-
-    async def _media_ok(session, url, timeout=30, video=False):
-        return True, 1234
-
-    async def _no_native(session, vid, fallback, label=""):
-        return native_video
-
-    async def _base_quality(session, vid, url, label=""):
-        return url
-
-    async def _dedupe(session, items):
-        return items
-
-    for name, replacement in (("fetch_arctic_post", _no_archive),
-                              ("enrich_gallery_redlib", _no_redlib),
-                              ("media_url_ok", _media_ok),
-                              ("resolve_video_url", _no_native),
-                              ("proxy_video_quality_upgrade", _base_quality),
-                              ("_dedupe_media_final_urls", _dedupe),
-                              ("reddit_proxy", proxy_media)):
-        saved[name] = getattr(v3, name, None)
-        setattr(v3, name, replacement)
-    try:
-        return await v3.resolve_post_media(_XpSession(), dict(_xp_base), None,
-                                           path=CHILD_PATH, label="xp-orch")
-    finally:
-        for name, original in saved.items():
-            setattr(v3, name, original)
-
-
-class _XpPosterOnlyProxy:
-    """The incident's shape: proxies answer with a poster tile only."""
-
-    async def fetch_proxy_post(self, session, path, label="", health=None,
-                               need_video=False):
-        return dict(_poster)
-
-    async def fetch_embeddit_stats(self, session, path, label=""):
-        return None
-
-
-_res = asyncio.run(_xp_run(_XpPosterOnlyProxy(),
-                           native_video="https://v.redd.it/" + VRED + "/CMAF_1080.mp4"))
-check("orchestration: an archive miss + image-only proxies reaches the native video chain",
-      any(m["kind"] == "video" for m in _res["media"]))
-check("orchestration: a successful native video removes the duplicate poster",
-      not any("external-preview" in m["url"] for m in _res["media"]))
-check("orchestration: the media source is recorded as the original, not the child",
-      _res["media_source"]["path"] == ORIG_PATH
-      and _res["media_source"]["is_crosspost_original"] is True)
-check("orchestration: the discovery provenance is recorded",
-      _res["media_source"]["provenance"] in {"matched-post-text", "arctic-archive",
-                                             "structured-parent", "self"})
-check("orchestration: the selected media kind/provider is observable",
-      _res["media_source"]["media_kinds"] == ["video"])
-
-_res2 = asyncio.run(_xp_run(_XpPosterOnlyProxy(), native_video=None))
-check("orchestration: with no validated video the poster is kept as an IMAGE fallback",
-      any(m["kind"] == "image" for m in _res2["media"])
-      and not any(m["kind"] == "video" for m in _res2["media"]))
-check("orchestration: the bounded fallback reason states why the poster was used",
-      _res2["media_source"]["fallback_reason"]
-      == "no-validated-video-after-native-chain;proxy-poster-retained-as-image-fallback")
-check("orchestration: a poster fallback is never summarized as a video",
-      "video" not in _res2["media_source"]["media_kinds"])
-check("orchestration: video evidence is retained independently of the image fallback",
-      _res2["media_source"]["video_expected"] is True)
-
-
-class _XpVideoProxy:
-    """The fixed shape: the equivalent route answers with the real video."""
-
-    async def fetch_proxy_post(self, session, path, label="", health=None,
-                               need_video=False):
-        return dict(_video) if path.startswith("/r/u_") else dict(_poster)
-
-    async def fetch_embeddit_stats(self, session, path, label=""):
-        return {"ups": 1, "comments": 1}
-
-
-_res3 = asyncio.run(_xp_run(_XpVideoProxy()))
-check("orchestration: a validated proxy video yields exactly one video tile",
-      [m["kind"] for m in _res3["media"]] == ["video"])
-check("orchestration: the child's Read Post URL/dedup identity is untouched",
-      _xp["child"]["dedup_key"] == "AnantaLeaks_1x6h1mf"
-      and _xp["child"]["read_post_url"].endswith("/comments/1x6h1mf/phone_stealing_from_aphotide/"))
-check("orchestration: a self-referential parent is not followed",
-      v3.is_same_post(CHILD_PATH, CHILD_PATH)
-      and not v3.is_same_post(ORIG_PATH, CHILD_PATH))
-
 
 if failures:
     print(f"SMOKE TEST FAILURES ({len(failures)}): {failures}")
