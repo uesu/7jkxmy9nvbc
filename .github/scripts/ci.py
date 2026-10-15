@@ -505,6 +505,18 @@ def main(argv: list[str] | None = None) -> int:
         print("FAILED:")
         for failure in failures:
             print(f"  - {failure}")
+        # Surface failures as workflow annotations too. Hosted logs can be
+        # unreachable to a reviewer or an automation client, and a bare
+        # "Process completed with exit code 1" names no cause; annotations are
+        # readable through the check-runs API, so the reason travels with the
+        # failure instead of only living in the log blob.
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            for failure in failures:
+                check_name, _, reason = failure.partition(":")
+                # "::" would terminate the annotation's property section early
+                # and swallow the message, so the title uses a single colon.
+                print(f"::error title=ci.py {check_name.strip()} failed::"
+                      f"{reason.strip()}")
         return 1
     print("ALL CHECKS PASS")
     return 0
