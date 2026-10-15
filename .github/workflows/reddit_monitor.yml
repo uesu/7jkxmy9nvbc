@@ -77,9 +77,11 @@ jobs:
 
       - name: Record checked-out code SHA and report paths
         run: |
-          echo "MONITOR_CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "RUN_REPORT_PATH=${RUNNER_TEMP}/news-express-reddit-report.json" >> "$GITHUB_ENV"
-          echo "PERSISTENCE_REPORT_PATH=${RUNNER_TEMP}/news-express-reddit-persistence.json" >> "$GITHUB_ENV"
+          {
+            echo "MONITOR_CODE_SHA=$(git rev-parse HEAD)"
+            echo "RUN_REPORT_PATH=${RUNNER_TEMP}/news-express-reddit-report.json"
+            echo "PERSISTENCE_REPORT_PATH=${RUNNER_TEMP}/news-express-reddit-persistence.json"
+          } >> "$GITHUB_ENV"
           python - <<'PY'
           import hashlib, os, sys
           digest = hashlib.sha256(open("requirements.txt", "rb").read()).hexdigest()
