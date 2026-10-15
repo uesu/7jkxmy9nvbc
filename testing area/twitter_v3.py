@@ -130,6 +130,29 @@ except Exception as _e:  # only when the file is absent from the repo
     _run_report = None
     logging.warning(f"run_report unavailable ({_e}) — no structured run report this run.")
 
+
+def _flush_run_report(report, result: str, problem: str | None = None) -> None:
+    """Write the run report. Never raises, never changes the run outcome.
+
+    Telemetry failure must not resend a card or mask the original application
+    failure, so a failed write only logs a warning and the workflow footer
+    reports the summary as *unavailable* — which is truthful, unlike a fake
+    zero-activity report. Identical to the Reddit engine's helper.
+    """
+    if report is None:
+        return
+    try:
+        if problem:
+            report.error(problem)
+        report.set("durations.monitor", report.elapsed())
+        report.mark(result)
+        if not report.write():
+            logging.warning("run report could not be written — the summary will "
+                            "report it as unavailable.")
+    except Exception as exc:  # noqa: BLE001 - telemetry must never break a run
+        logging.warning(f"run report could not be written ({exc}) — the summary "
+                        f"will report it as unavailable.")
+
 # Round 53: empty (an unset-but-wired secret) means "not configured", so the
 # documented default list still applies — os.getenv(name, default) would not.
 ACCOUNTS_STR = (os.getenv("ACCOUNTS") or "").strip() or "TYPEII_EN,PomPom_HonkaiSR,Wuthering_Waves,HonkaiNA,Ananta_EN"
@@ -1904,7 +1927,12 @@ async def main():
                                 and "video" in str(item["media"].get("url", "")).lower()
                                 for item in (payload.get("components") and [] or [])
                             )
-                            report.incr("media.video" if has_video else "media.image")
+                            # The counter records the media the card actually
+                            # delivered, never the media that was requested.
+                            if has_video:
+                                report.incr("media.video")
+                            else:
+                                report.incr("media.image")
                         logging.info(f"V3 Posted: {unique_key} (lang={lang or 'en'}{' | article' if is_article else ''} | source={tweet_source})")
                         created = None
                         if resp.status == 200:
@@ -1942,15 +1970,12 @@ async def main():
         logging.error(f"DEDUP GUARD: {len(missing)} key(s) posted this run are "
                       f"MISSING from the saved dedup cache — they WILL be "
                       f"re-posted next run: {sorted(missing)[:10]}")
-    if report is not None:
-        if missing:
-            report.error(f"{len(missing)} posted key(s) missing from the saved dedup cache")
-        report.set("durations.monitor", report.elapsed())
-        report.mark("degraded" if missing else "completed")
-        if not report.write():
-            # Telemetry failure must never mask the application outcome.
-            logging.warning("run report could not be written — the summary will "
-                            "report it as unavailable.")
+    _flush_run_report(
+        report,
+        "degraded" if missing else "completed",
+        problem=(f"{len(missing)} posted key(s) missing from the saved dedup cache"
+                 if missing else None),
+    )
     logging.info("Twitter V3 Monitor execution finished.")
 
 

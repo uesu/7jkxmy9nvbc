@@ -853,7 +853,40 @@ except Exception as _proxy_import_error:
     reddit_proxy = None
     logging.warning(f"reddit_proxy module unavailable — native media only: {_proxy_import_error}")
 
+# Structured run report (2026-10-15 maintenance round). Soft import: without
+# the module the monitor behaves exactly as before and the workflow footer
+# reports the summary as unavailable instead of inventing counters from
+# formatted log lines. Recording telemetry must never change a posting
+# decision, resend a card, or mask the original application failure.
+try:
+    import run_report as _run_report
+except Exception as _report_import_error:
+    _run_report = None
+    logging.warning(f"run_report module unavailable — no structured run report "
+                    f"this run: {_report_import_error}")
+
 _proxy_health = None   # per-run warm-up result (set in main(), read in resolve_post_media)
+
+
+def _flush_run_report(report, result: str) -> None:
+    """Write the run report. Never raises, never changes the run outcome.
+
+    Telemetry failure must not resend a card or mask the original application
+    failure, so a failed write only logs a warning and the workflow footer
+    reports the summary as *unavailable* — which is truthful, unlike a fake
+    zero-activity report.
+    """
+    if report is None:
+        return
+    try:
+        report.set("durations.monitor", report.elapsed())
+        report.mark(result)
+        if not report.write():
+            logging.warning("run report could not be written — the summary will "
+                            "report it as unavailable.")
+    except Exception as exc:  # noqa: BLE001 - telemetry must never break a run
+        logging.warning(f"run report could not be written ({exc}) — the summary "
+                        f"will report it as unavailable.")
 
 
 def _media_satisfies(result, need_video: bool = False) -> bool:
@@ -5324,6 +5357,17 @@ async def main():
     posted = load_posted()
     pending = load_pending()
     posted_messages = load_posted_messages()
+
+    # 2026-10-15 maintenance round: one bounded structured run report. Every
+    # counter below is a real numeric outcome — never a count of matching log
+    # lines — and unique subreddits are tracked separately from HTTP requests.
+    report = _run_report.RunReport.from_env() if _run_report is not None else None
+    if report is not None:
+        for _sub in SUBREDDITS:
+            report.note_target(_sub, configured=True)
+        report.set("targets.configured", len(SUBREDDITS))
+        report.set("durations.setup", report.elapsed())
+
     _listing_cache.clear()
     _redlib_post_page_cache.clear()
     _proxy_post_cache.clear()
@@ -5367,6 +5411,23 @@ async def main():
         else:
             # ---- PRIMARY: one combined request for all subreddits ---------
             combined = await fetch_combined_feed(session)
+            if report is not None:
+                # A feed that answered is not the same as a usable feed: an
+                # HTTP-200 bot-check page parses to zero entries.
+                report.note_request()
+                _entries = getattr(combined, "entries", None)
+                if _entries:
+                    report.incr("feeds.parsed")
+                    report.incr("feeds.http_ok")
+                    report.incr("outcomes.entries", len(_entries))
+                    for _sub in SUBREDDITS:
+                        report.note_target(_sub, usable=True)
+                elif combined is not None:
+                    report.incr("feeds.challenged")
+                    report.warn("combined feed returned HTTP 200 but 0 entries "
+                                "(bot check / stale) — not a usable feed")
+                else:
+                    report.incr("feeds.invalid")
             new_posts = []  # (subreddit, path, unique_key, published_ts, activity_ts, entry)
 
             def collect(entries, known_subreddit: str | None):
@@ -5448,8 +5509,11 @@ async def main():
             _verify_dedup_save(posted_at_start, posted, saved)
             save_pending(pending)
             save_posted_messages(posted_messages)
+            _flush_run_report(report, "completed")
             return
 
+        if report is not None:
+            report.set("targets.attempted_candidates", total_found)
         logging.info(f"Found {total_found} new Reddit posts. Building V3 cards...")
 
         # newest first per sub for stable ordering
@@ -5476,6 +5540,9 @@ async def main():
             webhook_url = get_webhook_for_subreddit(subreddit)
             if not webhook_url:
                 logging.error(f"No webhook configured for r/{subreddit}. Skipping {unique_key}.")
+                if report is not None:
+                    report.incr("outcomes.skipped")
+                    report.note_reason("skipped.", "no-webhook")
                 continue
 
             reddit_url = f"https://www.reddit.com{path}"
@@ -5533,6 +5600,9 @@ async def main():
                     logging.info(f"[{unique_key}] pristine /new listing unavailable "
                                  f"for r/{subreddit} this tick (outage, not absence) "
                                  f"— skipped (not cached), retried next tick.")
+                    if report is not None:
+                        report.incr("outcomes.skipped")
+                        report.note_reason("skipped.", "listing-unavailable")
                     continue
                 _r64_ids, _r64_oldest_age = _r64_listing
                 _r64_candidate_id = (extract_post_id(path) or "").lower()
@@ -5783,6 +5853,27 @@ async def main():
                         logging.info(f"Reddit V3 Posted: {unique_key} (media={kinds} | {mode} | "
                                      f"{len(data['media'])} item(s)) | LATENCY "
                                      f"{_latency / 60:.1f}min after creation{_held_note}")
+                        if report is not None:
+                            # One successful delivery is one post — three posts
+                            # from one subreddit are three, not one log line.
+                            report.incr("outcomes.posted")
+                            report.note_reason("posted.", "discord-ok")
+                            report.note_target(subreddit, usable=True)
+                            _src = data.get("media_source") or {}
+                            if "video" in str(kinds):
+                                report.incr("media.video")
+                            else:
+                                report.incr("media.image")
+                            if _src.get("is_crosspost_original"):
+                                report.incr("media.crosspost_resolved")
+                            if _src.get("quality_upgraded"):
+                                report.incr("media.quality_upgrades")
+                            if _src.get("fallback_reason"):
+                                report.note_fallback(str(_src["fallback_reason"]))
+                                # A "kept for text/stats" outcome followed by an
+                                # image must never be summarized as a video.
+                                if "video" not in str(kinds):
+                                    report.note_reason("posted.", "image-not-video")
                         # Round 66: a body that exceeded the card budget
                         # continues in follow-up messages — same webhook,
                         # same mechanism/ordering as the YouTube link
@@ -5863,8 +5954,16 @@ async def main():
                     else:
                         body = await resp.text()
                         logging.error(f"Discord error {resp.status} for {unique_key}: {body}")
+                        if report is not None:
+                            report.incr("outcomes.held")
+                            report.note_reason("held.", f"discord-{resp.status}")
+                            report.error(f"{unique_key}: Discord returned {resp.status}")
             except Exception as e:
                 logging.error(f"Failed building/posting {unique_key}: {e}")
+                if report is not None:
+                    report.incr("outcomes.held")
+                    report.note_reason("held.", "build-or-post-failure")
+                    report.error(f"{unique_key}: {type(e).__name__}")
 
         if proxy_video_heal_queue and not DRY_RUN:
             logging.info(f"MEDIA-HEAL: {len(proxy_video_heal_queue)} unresolved Reddit "
@@ -5882,11 +5981,14 @@ async def main():
 
     if DRY_RUN:
         logging.info("DRY RUN finished: cache NOT saved, Discord NOT touched.")
+        _flush_run_report(report, "completed")
     else:
         saved = save_posted(posted, frozenset(posted - posted_at_start))
         _verify_dedup_save(posted_at_start, posted, saved)
         save_pending(pending)
         save_posted_messages(posted_messages)
+        _missing = (posted - posted_at_start) - saved
+        _flush_run_report(report, "degraded" if _missing else "completed")
         logging.info("Reddit V3 Monitor execution finished.")
 
 

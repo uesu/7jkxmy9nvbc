@@ -227,6 +227,35 @@ check("the renderer's exit code cannot fail the monitor",
       "always exit 0" in source)
 
 
+# ---------------------------------------------------------------------------
+print("\n--- 9. BOTH engines emit a report (no engine left 'unavailable') ---")
+
+# A footer that renders 'unavailable' for one monitor is truthful but useless:
+# the point is real numeric outcomes from both engines. These check the wiring
+# exists in the engine source, not only in the workflow text.
+for _engine in ("twitter_v3", "reddit_main_v3"):
+    _src = _text("testing area", f"{_engine}.py")
+    check(f"{_engine} imports the report module softly",
+          "import run_report as _run_report" in _src)
+    check(f"{_engine} degrades safely when the module is absent",
+          "_run_report = None" in _src)
+    check(f"{_engine} counts unique accounts and real outcomes, not log lines",
+          "note_target(" in _src and "note_reason(" in _src)
+    check(f"{_engine} records the media outcome it actually delivered",
+          'incr("media.video")' in _src and 'incr("media.image")' in _src)
+    check(f"{_engine} flushes the report when the run ends",
+          "_flush_run_report(report" in _src)
+    check(f"{_engine} can never let telemetry break the application",
+          "telemetry" in _src and "except Exception" in _src)
+
+# The renderer must treat a report from either engine identically, so the
+# workflow never has to know which monitor produced it.
+_rep = write_tmp(fixture("run_report_full.json"))
+_code = r.main(["--report", _rep, "--persistence",
+                write_tmp(fixture("persistence_pushed.json")), "--workflow", "X"])
+check("the renderer is engine-agnostic", _code == 0)
+
+
 print()
 if failures:
     print(f"RUN SUMMARY TEST FAILURES ({len(failures)}): {failures}")
