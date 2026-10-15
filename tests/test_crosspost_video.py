@@ -58,12 +58,70 @@ class OriginalDiscoveryTests(unittest.TestCase):
         self.assertEqual(path, "/user/someuser/comments/parent03/")
 
     def test_own_slugged_link_is_skipped(self):
-        html = (
-            'crosspost <a href="/r/Beta/comments/child004/child_slug/">self</a> '
-            '<a href="/r/Alpha/comments/parent04/orig_slug/">orig</a>'
-        )
+        # A verb-governed link that points back at the child is not its parent,
+        # even though the slug differs from the bare id form.
+        html = 'crossposted this from <a href="/r/Beta/comments/child004/child_slug/">self</a>'
         path = v3.find_crosspost_original_path(html, "/r/Beta/comments/child004/child_slug/")
-        self.assertEqual(path, "/r/Alpha/comments/parent04/")
+        self.assertIsNone(path)
+
+    def test_bare_keyword_near_an_unrelated_link_is_not_a_parent(self):
+        # Regression: the body used to be scanned for any permalink once the word
+        # "crosspost" appeared anywhere in it, so an unrelated link in the same
+        # post was promoted to the parent.
+        body = (
+            "This is a crosspost. Unrelated discussion: "
+            "/r/example/comments/abc123/topic/"
+        )
+        self.assertIsNone(v3.find_crosspost_original_path(body, "/r/example/comments/child99/"))
+
+    def test_verb_region_does_not_leak_across_a_sentence_or_line(self):
+        # The governing region is bounded: a link in a later sentence or on a
+        # later line is not what the post was crossposted from.
+        for label, body in (
+            ("later sentence", "u/x crossposted this. See also /r/Other/comments/zzz1/x for more."),
+            ("later line", "u/x crossposted this from r/Y\nUnrelated: /r/Other/comments/zzz2/x"),
+        ):
+            with self.subTest(case=label):
+                self.assertIsNone(
+                    v3.find_crosspost_original_path(body, "/r/Beta/comments/c1/")
+                )
+
+    def test_verb_with_attribution_then_plain_permalink(self):
+        # Real-world shape: an attribution sits between the verb and the link.
+        self.assertEqual(
+            v3.find_crosspost_original_path(
+                "u/x crossposted this from r/Y — /r/AnantaLeaks/comments/1wgjk4a/x", None
+            ),
+            "/r/AnantaLeaks/comments/1wgjk4a/",
+        )
+
+    def test_self_link_inside_the_region_is_skipped_not_returned(self):
+        body = (
+            'u/x crossposted this from r/S — '
+            '<a href="/r/C/comments/zc1/slug/">own</a> '
+            '<a href="/r/S/comments/zp1/slug/">orig</a>'
+        )
+        self.assertEqual(
+            v3.find_crosspost_original_path(body, "/r/C/comments/zc1/slug/"),
+            "/r/S/comments/zp1/",
+        )
+
+    def test_crosspost_verb_still_binds_its_own_link(self):
+        # The tightened rule must not lose genuine markup: the link has to be the
+        # object of the verb, which is what makes it a relationship.
+        for label, body, expected in (
+            ("anchor", 'crossposted this from <a href="/user/u/comments/parent09/x/">u/u</a>',
+             "/user/u/comments/parent09/"),
+            ("bare url", "crosspost of https://www.reddit.com/r/Alpha/comments/parent10/t/",
+             "/r/Alpha/comments/parent10/"),
+            ("crossposted of", "This was crossposted of /r/Alpha/comments/parent11/t/",
+             "/r/Alpha/comments/parent11/"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(
+                    v3.find_crosspost_original_path(body, "/r/Beta/comments/child012/"),
+                    expected,
+                )
 
     def test_body_link_without_crosspost_context_is_not_a_parent(self):
         self.assertIsNone(v3.find_crosspost_original_path(

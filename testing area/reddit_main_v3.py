@@ -1358,6 +1358,28 @@ _LABELED_ORIGINAL_RE = re.compile(
 )
 
 
+# A permalink only counts as the original when it is the *object* of a crosspost
+# verb ("crossposted this from <link>"). The word "crosspost" appearing anywhere
+# in the body used to promote the next unrelated link in the text to parent.
+# A permalink only counts as the original when it sits in the region governed by
+# a crosspost verb ("crossposted this from <region>"). Merely containing the word
+# "crosspost" used to promote the next unrelated link anywhere in the body.
+_CROSSPOST_VERB_RE = re.compile(
+    r"(?is)crosspost(?:ed|ing)?\s+(?:this\s+|it\s+)?(?:from|of)\s+"
+)
+# The governed region is bounded, and stops at a line break so a following
+# paragraph of unrelated links cannot be pulled into it.
+_CROSSPOST_WINDOW_LIMIT = 300
+
+
+def _crosspost_region(text: str, start: int) -> str:
+    end = min(len(text), start + _CROSSPOST_WINDOW_LIMIT)
+    newline = text.find("\n", start, end)
+    if newline != -1:
+        end = newline
+    return text[start:end]
+
+
 def canonical_post_id(link: str | None) -> str | None:
     path = normalize_reddit_path(link or "") or (link or "")
     return extract_post_id(path)
@@ -1409,7 +1431,11 @@ def find_crosspost_original_path(text: str | None, own_path: str | None = None) 
     Structured parent metadata is handled separately. Text parsing accepts:
     * an explicitly labelled Original Post permalink (no English 'crosspost'
       keyword required), and
-    * a permalink in a 'crosspost' context that is not the child itself.
+    * a permalink that is the object of a crosspost verb ("crossposted this
+      from <link>") and is not the child itself.
+
+    A bare mention of "crosspost" next to an unrelated body link is not a
+    relationship and resolves to nothing.
 
     Comparisons use the canonical post id so a slugged child permalink cannot
     be mistaken for the original. Arbitrary body links are not parents.
@@ -1426,15 +1452,18 @@ def find_crosspost_original_path(text: str | None, own_path: str | None = None) 
             if path and not (own_id and canonical_post_id(path) == own_id):
                 return path
 
-    if "crosspost" not in text.lower():
-        return None
-    for m in CROSSPOST_PERMALINK_RE.finditer(text):
-        path = _normalized_foreign_safe_path(m.group(0), text, m.start())
-        if not path:
-            continue
-        if own_id and canonical_post_id(path) == own_id:
-            continue
-        return path
+    # Verb-governed only. Merely mentioning "crosspost" near a link is not a
+    # relationship: the link has to be what the post says it was crossposted from.
+    for verb in _CROSSPOST_VERB_RE.finditer(text):
+        region = _crosspost_region(text, verb.end())
+        offset = verb.end()
+        for m in CROSSPOST_PERMALINK_RE.finditer(region):
+            path = _normalized_foreign_safe_path(m.group(0), region, offset + m.start())
+            if not path:
+                continue
+            if own_id and canonical_post_id(path) == own_id:
+                continue
+            return path
     return None
 
 
