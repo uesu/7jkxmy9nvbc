@@ -437,10 +437,110 @@ def _review(login, state, when, rid):
     return {"user": {"login": login}, "state": state, "submitted_at": when, "id": rid}
 
 
+class RequirementsDirectiveTests(unittest.TestCase):
+    """A safe version pair must not conceal a change to where packages come from."""
+
+    def _risk(self, patch):
+        return maintenance.snapshot_risk_from_files(
+            [{"filename": "requirements.txt", "patch": patch}], None
+        )
+
+    SAFE = "-aiohttp==3.14.5 \\\n+aiohttp==3.14.6 \\\n"
+
+    def test_directive_alongside_a_safe_patch_requires_review(self):
+        # Regression: only the paired version lines were inspected, so an index
+        # redirect rode along inside an otherwise routine patch.
+        directive = "+--extra-index-url https://untrusted.example/simple\n"
+        for label, patch in (
+            ("directive after the patch", self.SAFE + directive),
+            ("directive before the patch", directive + self.SAFE),
+        ):
+            with self.subTest(position=label):
+                risk = self._risk(patch)
+                self.assertEqual(risk["risk"], "review-required")
+                self.assertFalse(risk["auto_eligible"])
+
+    def test_every_unsafe_directive_is_rejected(self):
+        cases = {
+            "extra-index-url": "+--extra-index-url https://evil.example/simple\n",
+            "index-url": "+--index-url https://evil.example/simple\n",
+            "trusted-host": "+--trusted-host evil.example\n",
+            "constraint": "+-c /tmp/evil.txt\n",
+            "find-links": "+-f https://evil.example/\n",
+            "vcs url": "+aiohttp @ git+https://evil.example/x.git\n",
+            "direct url": "+aiohttp @ https://evil.example/a.whl\n",
+        }
+        for label, line in cases.items():
+            with self.subTest(directive=label):
+                risk = self._risk(self.SAFE + line)
+                self.assertEqual(risk["risk"], "review-required", label)
+
+    def test_marker_on_an_otherwise_normal_version_line(self):
+        risk = self._risk('-aiohttp==3.14.5\n+aiohttp==3.14.5 ; python_version < "3.9"\n')
+        self.assertEqual(risk["risk"], "review-required")
+        self.assertEqual(risk["reason"], "requirements-environment-marker")
+
+    def test_unrecognised_changed_content_is_not_routine(self):
+        risk = self._risk("-aiohttp==3.14.5\n+aiohttp==3.14.6\n+something nobody expected\n")
+        self.assertEqual(risk["risk"], "review-required")
+        self.assertEqual(risk["reason"], "requirements-unrecognised-change")
+
+    def test_plain_patches_stay_routine(self):
+        for label, patch in (
+            ("single", self.SAFE),
+            ("multiple", "-a==1.0.0\n+a==1.0.1\n-b==2.0.0\n+b==2.0.1\n"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(self._risk(patch)["risk"], "routine")
+
+
+class ForcedVersionVerificationTests(unittest.TestCase):
+    """A well-formed version string is not proof the release exists."""
+
+    MANIFEST = [{"version": "3.14.9", "stable": True,
+                 "files": [{"arch": "x64", "platform": "linux", "platform_version": "22.04"}]}]
+
+    def test_unknown_forced_version_is_not_proposed(self):
+        # Regression: 3.14.999 parsed cleanly, so it was proposed as a patch with
+        # auto_eligible True despite existing in no manifest.
+        for label, manifest in (("empty", {}), ("populated", self.MANIFEST)):
+            with self.subTest(manifest=label):
+                result = maintenance.select_python_candidate(
+                    maintenance.parse_version("3.14.8"),
+                    manifest if isinstance(manifest, list) else [],
+                    force="3.14.999",
+                )
+                self.assertEqual(result["status"], "review-required")
+                self.assertEqual(result["reason"], "forced-unverified-in-manifest")
+                self.assertFalse(result["auto_eligible"])
+
+    def test_forced_version_present_in_the_manifest_is_proposed(self):
+        result = maintenance.select_python_candidate(
+            maintenance.parse_version("3.14.8"), self.MANIFEST, force="3.14.9"
+        )
+        self.assertEqual(result["status"], "proposed")
+        self.assertTrue(result["auto_eligible"])
+
+
 class EffectiveReviewTests(unittest.TestCase):
     """Latest decision per reviewer, not any historical change request."""
 
     PR = {"state": "open", "draft": False, "labels": []}
+
+    def test_a_comment_does_not_erase_an_open_change_request(self):
+        # Regression: the newest state of any kind won, so a later COMMENTED
+        # replaced CHANGES_REQUESTED and the hold disappeared.
+        for state in ("COMMENTED", "PENDING"):
+            with self.subTest(state=state):
+                reviews = [_review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1),
+                           _review("a", state, "2026-02-01T00:00:00Z", 2)]
+                self.assertIsNotNone(maintenance.review_blocks(self.PR, reviews, ["hold"]))
+
+    def test_a_comment_between_request_and_approval_does_not_block(self):
+        reviews = [_review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1),
+                   _review("a", "COMMENTED", "2026-02-01T00:00:00Z", 2),
+                   _review("a", "APPROVED", "2026-03-01T00:00:00Z", 3)]
+        self.assertIsNone(maintenance.review_blocks(self.PR, reviews, ["hold"]))
 
     def test_later_approval_clears_an_old_change_request(self):
         reviews = [_review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1),
@@ -483,8 +583,13 @@ class DowngradeTests(unittest.TestCase):
         self.assertFalse(result["auto_eligible"])
 
     def test_forced_patch_upgrade_still_proposes(self):
+        # The candidate must exist in the manifest; see
+        # ForcedVersionVerificationTests for the unverified case.
+        manifest = [{"version": "3.14.9", "stable": True,
+                     "files": [{"arch": "x64", "platform": "linux",
+                                "platform_version": "22.04"}]}]
         result = maintenance.select_python_candidate(
-            maintenance.parse_version("3.14.8"), {}, force="3.14.9"
+            maintenance.parse_version("3.14.8"), manifest, force="3.14.9"
         )
         self.assertEqual(result["status"], "proposed")
         self.assertTrue(result["auto_eligible"])

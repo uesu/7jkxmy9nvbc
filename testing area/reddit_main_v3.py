@@ -1392,7 +1392,9 @@ def is_same_reddit_post(left: str | None, right: str | None) -> bool:
 
 def _permalink_host_allowed(text: str, match_start: int) -> bool:
     prefix = text[max(0, match_start - 96):match_start]
-    host_m = re.search(r"https?://([^/\s]+)$", prefix)
+    # Scheme-relative ("//evil.example/...") is just as foreign as an absolute
+    # URL; matching only http(s) let it through and kept the Reddit-looking path.
+    host_m = re.search(r"(?:https?:)?//([^/\s]+)$", prefix)
     if not host_m:
         return True
     host = host_m.group(1).split("@")[-1].split(":")[0].lower()
@@ -1456,9 +1458,12 @@ def find_crosspost_original_path(text: str | None, own_path: str | None = None) 
     # relationship: the link has to be what the post says it was crossposted from.
     for verb in _CROSSPOST_VERB_RE.finditer(text):
         region = _crosspost_region(text, verb.end())
-        offset = verb.end()
         for m in CROSSPOST_PERMALINK_RE.finditer(region):
-            path = _normalized_foreign_safe_path(m.group(0), region, offset + m.start())
+            # Coordinates must agree: the host check looks backwards from the
+            # position it is given, so a region-relative match needs a
+            # region-relative offset or it inspects the wrong substring and a
+            # foreign host slips through.
+            path = _normalized_foreign_safe_path(m.group(0), region, m.start())
             if not path:
                 continue
             if own_id and canonical_post_id(path) == own_id:

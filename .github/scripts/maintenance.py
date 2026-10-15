@@ -233,6 +233,19 @@ def select_python_candidate(
                 "current": str(current),
                 "auto_eligible": False,
             }
+        # A well-formed version string is not evidence that the release exists or
+        # that a stable archive is available for this runner. Without that, the
+        # proposal would rewrite the pin to something nothing can install.
+        available = [version for version, _entry in iter_stable_manifest_versions(manifest)]
+        if not any(v.tuple == forced.tuple for v in available):
+            return {
+                "status": "review-required",
+                "reason": "forced-unverified-in-manifest",
+                "kind": kind,
+                "candidate": str(forced),
+                "current": str(current),
+                "auto_eligible": False,
+            }
         return {
             "status": "proposed",
             "reason": "manual-override",
@@ -544,6 +557,11 @@ def validate_diff(
     return {"ok": True, "reason": "approved-paths"}
 
 
+# Only these states decide whether a reviewer is blocking. COMMENTED and PENDING
+# are conversation, not decisions, and must not supersede one.
+_REVIEW_DECISION_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
+
+
 def _effective_reviews(reviews: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     """The latest decision per reviewer, not every decision ever submitted.
 
@@ -556,8 +574,10 @@ def _effective_reviews(reviews: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     for index, review in enumerate(reviews or []):
         if not isinstance(review, dict):
             continue
-        state = str(review.get("state") or "")
-        if not state:
+        state = str(review.get("state") or "").upper()
+        if state not in _REVIEW_DECISION_STATES:
+            # COMMENTED and PENDING carry no decision. Letting a later comment
+            # become the "latest state" silently erased an open change request.
             continue
         user = review.get("user") if isinstance(review.get("user"), dict) else {}
         login = str(user.get("login") or "") or f"_anonymous_{index}"
@@ -1021,6 +1041,37 @@ def _classify_workflow_patch(patch: str, filename: str) -> list[dict[str, Any]]:
     return out
 
 
+# Directives that change *where* or *how* a package resolves. None of them is a
+# version bump, and any one of them can silently redirect an install to an
+# attacker-controlled index, so none may ride along inside a "routine" patch.
+_REQ_DIRECTIVE_RE = re.compile(
+    r"(?i)(?:^|\s)(?:--extra-index-url|--index-url|-i|--find-links|-f|--trusted-host"
+    r"|--constraint|-c|--pre|-e|--editable|--no-index)\b"
+)
+_REQ_VCS_RE = re.compile(r"(?i)\b(?:git|hg|svn|bzr)\+")
+_REQ_DIRECT_URL_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*@\s*\S+")
+_REQ_MARKER_RE = re.compile(r";\s*[A-Za-z_][A-Za-z0-9_]*\s*(?:<|>|=|!|~)")
+_REQ_VERSION_LINE_RE = re.compile(r"^([-+])([A-Za-z0-9_.-]+)==([0-9A-Za-z.]+)")
+_REQ_BENIGN_RE = re.compile(r"^\s*(?:--hash=|#|$)")
+
+
+def _unsafe_requirements_line(body: str) -> str | None:
+    """Name the reason a changed requirements line is not a plain version bump."""
+    if _REQ_BENIGN_RE.match(body):
+        return None
+    if _REQ_DIRECTIVE_RE.search(body):
+        return "requirements-index-or-constraint-directive"
+    if _REQ_VCS_RE.search(body):
+        return "requirements-vcs-url"
+    if _REQ_DIRECT_URL_RE.match(body):
+        return "requirements-direct-url"
+    if _REQ_MARKER_RE.search(body):
+        return "requirements-environment-marker"
+    # Anything else that changed and is not a version pair is unrecognised
+    # content. Failing closed is cheaper than reasoning about it here.
+    return "requirements-unrecognised-change"
+
+
 def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, Any]]:
     """Classify every package transition in a requirements diff, not just the last.
 
@@ -1033,13 +1084,27 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
     added: dict[str, str] = {}
     order: list[str] = []
     saw_change = False
+    unsafe: list[str] = []
     for line in patch.splitlines():
-        if line.startswith(("---", "+++")):
+        if line.startswith(("---", "+++")) or line.startswith("@@"):
             continue
-        match = re.match(r"^([-+])([A-Za-z0-9_.-]+)==([0-9A-Za-z.]+)", line)
+        match = _REQ_VERSION_LINE_RE.match(line)
         if not match:
+            if line[:1] in ("+", "-"):
+                saw_change = True
+                reason = _unsafe_requirements_line(line[1:])
+                if reason and reason not in unsafe:
+                    unsafe.append(reason)
             continue
         saw_change = True
+        # Anything trailing the version on the same line: a marker or a URL there
+        # still changes how the package resolves. A line-continuation backslash
+        # is only formatting.
+        remainder = line[match.end():].strip().rstrip("\\").strip()
+        if remainder:
+            tail_reason = _unsafe_requirements_line(remainder)
+            if tail_reason and tail_reason not in unsafe:
+                unsafe.append(tail_reason)
         sign, pkg, ver = match.group(1), match.group(2).lower(), match.group(3)
         if pkg not in order:
             order.append(pkg)
@@ -1051,6 +1116,10 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
                 "reason": "requirements-patch-unparsed", "name": filename}
     if not saw_change:
         return [unparsed]
+    if unsafe:
+        return [{"risk": "review-required", "auto_eligible": False,
+                 "reason": unsafe[0], "name": filename,
+                 "reasons": unsafe}]
     out: list[dict[str, Any]] = []
     for pkg in order:
         old, new = removed.get(pkg), added.get(pkg)

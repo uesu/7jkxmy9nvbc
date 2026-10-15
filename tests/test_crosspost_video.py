@@ -106,6 +106,40 @@ class OriginalDiscoveryTests(unittest.TestCase):
             "/r/S/comments/zp1/",
         )
 
+    def test_foreign_host_behind_the_verb_is_rejected(self):
+        # Regression: the sliced region was passed to the host check together
+        # with an offset taken from the full text, so the backwards scan inspected
+        # the wrong substring and never saw the foreign domain.
+        body = ("Someone crossposted this from "
+                "https://evil.example/r/example/comments/abc123/topic/")
+        self.assertIsNone(
+            v3.find_crosspost_original_path(body, "/r/example/comments/child99/")
+        )
+
+    def test_scheme_relative_foreign_host_is_rejected(self):
+        self.assertIsNone(v3.find_crosspost_original_path(
+            "crossposted this from //evil.example/r/X/comments/abc/t/",
+            "/r/Y/comments/c1/",
+        ))
+
+    def test_absolute_reddit_url_behind_the_verb_still_resolves(self):
+        self.assertEqual(
+            v3.find_crosspost_original_path(
+                "crossposted this from https://www.reddit.com/r/Alpha/comments/parent01/t/",
+                "/r/Beta/comments/c1/",
+            ),
+            "/r/Alpha/comments/parent01/",
+        )
+
+    def test_markdown_link_to_a_reddit_mirror_resolves(self):
+        self.assertEqual(
+            v3.find_crosspost_original_path(
+                "crossposted this from [orig](https://old.reddit.com/r/A/comments/p2/t/)",
+                "/r/Y/comments/c1/",
+            ),
+            "/r/A/comments/p2/",
+        )
+
     def test_crosspost_verb_still_binds_its_own_link(self):
         # The tightened rule must not lose genuine markup: the link has to be the
         # object of the verb, which is what makes it a relationship.
