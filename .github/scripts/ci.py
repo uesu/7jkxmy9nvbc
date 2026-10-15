@@ -94,8 +94,40 @@ def _locked_names(text: str) -> set[str]:
 
 
 def _run(cmd: list[str], cwd: str = REPO_ROOT) -> int:
+    return _run_captured(cmd, cwd)[0]
+
+
+def _run_captured(cmd: list[str], cwd: str = REPO_ROOT) -> tuple[int, str]:
+    """Run a command, echo it, and keep the evidence from a failure.
+
+    Hosted job logs are not always retrievable, and a check whose detail is
+    only a suite name gives a reviewer nothing to act on. Capturing the output
+    lets the failing lines travel inside the check detail, which is what the
+    ::error annotation carries — so the cause survives even when the log blob
+    does not. Output is still streamed so local runs read the same as before.
+    """
     print(f"$ {' '.join(cmd)}", flush=True)
-    return subprocess.call(cmd, cwd=cwd)
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    if proc.stdout:
+        print(proc.stdout, end="", flush=True)
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr, flush=True)
+    return proc.returncode, _failure_evidence(proc.stdout + proc.stderr)
+
+
+def _failure_evidence(output: str, limit: int = 6) -> str:
+    """Last few lines that actually explain a failure, not the whole transcript."""
+    lines = [line for line in output.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    interesting = [
+        line for line in lines
+        if line.startswith(("FAIL", "::error", "  File "))
+        or "Traceback" in line
+        or line.rstrip().endswith(("Error", "error"))
+    ]
+    picked = interesting[-limit:] if interesting else lines[-limit:]
+    return " | ".join(picked).strip()[:600]
 
 
 def check_compile(profile: dict) -> tuple[bool, str]:
@@ -138,8 +170,9 @@ def check_application(profile: dict) -> tuple[bool, str]:
     if not suites:
         return False, "no application suite registered for this profile"
     for suite in suites:
-        if _run(suite.split()) != 0:
-            return False, f"{suite} failed"
+        code, evidence = _run_captured(suite.split())
+        if code != 0:
+            return False, f"{suite} failed — {evidence or 'no output'}"
     return True, f"{len(suites)} application suite(s) passed"
 
 
@@ -154,14 +187,20 @@ def check_maintenance(profile: dict) -> tuple[bool, str]:
     suites = [t for t in _registered_test_commands(profile) if "test_maintenance.py" in t]
     if not suites:
         return False, "test_maintenance.py is not registered for this profile"
-    return _run(suites[0].split()) == 0, "maintenance policy suite"
+    code, evidence = _run_captured(suites[0].split())
+    if code != 0:
+        return False, f"maintenance policy suite failed — {evidence or 'no output'}"
+    return True, "maintenance policy suite"
 
 
 def check_reporting(profile: dict) -> tuple[bool, str]:
     suites = [t for t in _registered_test_commands(profile) if "test_run_summary.py" in t]
     if not suites:
         return False, "test_run_summary.py is not registered for this profile"
-    return _run(suites[0].split()) == 0, "run-summary renderer suite"
+    code, evidence = _run_captured(suites[0].split())
+    if code != 0:
+        return False, f"run-summary renderer suite failed — {evidence or 'no output'}"
+    return True, "run-summary renderer suite"
 
 
 def check_configuration(profile: dict) -> tuple[bool, str]:
@@ -170,7 +209,10 @@ def check_configuration(profile: dict) -> tuple[bool, str]:
     ]
     if not suites:
         return False, "test_configuration_contract.py is not registered for this profile"
-    return _run(suites[0].split()) == 0, "configuration contract suite"
+    code, evidence = _run_captured(suites[0].split())
+    if code != 0:
+        return False, f"configuration contract suite failed — {evidence or 'no output'}"
+    return True, "configuration contract suite"
 
 
 def check_lockfiles(profile: dict) -> tuple[bool, str]:
