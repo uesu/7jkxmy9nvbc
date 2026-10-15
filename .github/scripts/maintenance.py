@@ -119,6 +119,10 @@ def read_pin(pin_file: str | os.PathLike | None = None) -> Version:
 def version_kind(current: Version, candidate: Version) -> str:
     if candidate.tuple == current.tuple:
         return "none"
+    if candidate.tuple < current.tuple:
+        # A step backwards is not a patch. Classifying 3.14.8 -> 3.14.7 as "patch"
+        # made a forced downgrade auto-eligible.
+        return "downgrade"
     if candidate.major != current.major:
         return "major"
     if candidate.minor != current.minor:
@@ -202,6 +206,15 @@ def select_python_candidate(
         kind = version_kind(current, forced)
         if kind == "none":
             return {"status": "up-to-date", "reason": "forced-current", "current": str(current)}
+        if kind == "downgrade":
+            return {
+                "status": "review-required",
+                "reason": "override-downgrade",
+                "kind": kind,
+                "candidate": str(forced),
+                "current": str(current),
+                "auto_eligible": False,
+            }
         if kind == "major" or (kind == "minor" and forced.minor != current.minor + 1 and forced.major == current.major):
             return {
                 "status": "review-required",
@@ -298,6 +311,9 @@ def classify_python_change(current: str, candidate: str) -> dict[str, Any]:
     kind = version_kind(cur, nxt)
     if kind == "none":
         return {"risk": "routine", "kind": kind, "auto_eligible": False, "reason": "no-change"}
+    if kind == "downgrade":
+        return {"risk": "review-required", "kind": kind, "auto_eligible": False,
+                "reason": "downgrade-forbidden"}
     if kind == "patch":
         return {"risk": "routine", "kind": kind, "auto_eligible": True, "reason": "stable-patch"}
     if kind == "minor":
@@ -332,6 +348,8 @@ def classify_package_update(old: str | None, new: str | None, *, name: str = "")
         return {"risk": "review-required", "reason": "unknown-or-prerelease", "auto_eligible": False, "name": name}
     if old_v is None:
         return {"risk": "review-required", "reason": "unknown-previous", "auto_eligible": False, "name": name}
+    if new_v < old_v:
+        return {"risk": "review-required", "reason": "package-downgrade", "auto_eligible": False, "name": name}
     if new_v[0] != old_v[0]:
         return {"risk": "review-required", "reason": "package-major", "auto_eligible": False, "name": name}
     if old_v[0] == 0 and new_v[1] != old_v[1]:
@@ -490,6 +508,13 @@ def diff_touches_workflow_policy(patch: str) -> bool:
     return False
 
 
+def _path_allowed(name: str, allowed: set[str]) -> bool:
+    """Exact match, or a trusted directory entry written with a trailing slash."""
+    if name in allowed:
+        return True
+    return any(name.startswith(entry) for entry in allowed if entry.endswith("/"))
+
+
 def validate_diff(
     files: Sequence[Mapping[str, Any]],
     *,
@@ -501,7 +526,7 @@ def validate_diff(
     unexpected: list[str] = []
     for item in files:
         name = str(item.get("filename") or item.get("path") or "")
-        if name not in allowed:
+        if not _path_allowed(name, allowed):
             unexpected.append(name)
             continue
         patch = str(item.get("patch") or "")
@@ -519,6 +544,34 @@ def validate_diff(
     return {"ok": True, "reason": "approved-paths"}
 
 
+def _effective_reviews(reviews: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """The latest decision per reviewer, not every decision ever submitted.
+
+    Blocking on any historical CHANGES_REQUESTED holds a PR forever once a
+    reviewer changes their mind: a later APPROVED never clears it. A DISMISSED
+    review is the latest word from that reviewer and clears their earlier
+    request, so it counts as a decision rather than being dropped.
+    """
+    latest: dict[str, tuple[tuple[str, int], str]] = {}
+    for index, review in enumerate(reviews or []):
+        if not isinstance(review, dict):
+            continue
+        state = str(review.get("state") or "")
+        if not state:
+            continue
+        user = review.get("user") if isinstance(review.get("user"), dict) else {}
+        login = str(user.get("login") or "") or f"_anonymous_{index}"
+        try:
+            review_id = int(review.get("id") or 0)
+        except (TypeError, ValueError):
+            review_id = index
+        key = (str(review.get("submitted_at") or ""), review_id)
+        previous = latest.get(login)
+        if previous is None or key >= previous[0]:
+            latest[login] = (key, state)
+    return {login: state for login, (_key, state) in latest.items()}
+
+
 def review_blocks(pr: Mapping[str, Any], reviews: Sequence[Mapping[str, Any]], hold_labels: Sequence[str]) -> str | None:
     if pr.get("draft") is True:
         return "draft"
@@ -533,12 +586,9 @@ def review_blocks(pr: Mapping[str, Any], reviews: Sequence[Mapping[str, Any]], h
     for hold in hold_labels:
         if hold.lower() in labels:
             return f"hold-label:{hold}"
-    for review in reviews or []:
-        if not isinstance(review, dict):
-            continue
-        state = str(review.get("state") or "")
+    for login, state in _effective_reviews(reviews).items():
         if state == "CHANGES_REQUESTED":
-            return "changes-requested"
+            return f"changes-requested:{login}"
     return None
 
 
@@ -577,6 +627,22 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
     if str(snapshot["repository"]) != expected_repo:
         return Decision("fail", "unexpected-repository")
 
+    # Branch name and base ref alone are not provenance. A PR opened from a fork,
+    # or aimed at a different repository, must never reach the merge call, so both
+    # sides of the association are bound to the trusted policy repository and a
+    # missing association fails closed rather than being treated as same-repo.
+    head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+    head_repo = head.get("repo") if isinstance(head.get("repo"), dict) else {}
+    base_repo = base.get("repo") if isinstance(base.get("repo"), dict) else {}
+    head_full = str(head_repo.get("full_name") or "")
+    base_full = str(base_repo.get("full_name") or "")
+    if not head_full or not base_full:
+        return Decision("fail", "missing-repo-association", risk="blocked")
+    if base_full != expected_repo:
+        return Decision("fail", "foreign-base-repository", risk="blocked")
+    if head_full != expected_repo:
+        return Decision("fail", "cross-fork-head", risk="blocked")
+
     identities = policy.get("updater_identities") or {}
     kind = trusted_updater(pr, identities)
     if kind is None:
@@ -594,12 +660,16 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
     files = snapshot.get("files") or []
     allowed = list((identities.get(kind) or {}).get("allowed_files") or policy.get("allowed_files") or [])
     if kind == "dependabot":
-        allowed = list(snapshot.get("allowed_files") or policy.get("dependabot_allowed_files") or allowed)
+        allowed = list(
+            snapshot.get("trusted_allowed_files")
+            or policy.get("dependabot_allowed_files")
+            or allowed
+        )
         if not allowed:
-            allowed = [str(item.get("filename") or "") for item in files if isinstance(item, dict)]
-            # Dependabot may touch lock/input files; still reject workflow policy.
-            if not allowed:
-                return Decision("fail", "empty-diff")
+            # Deriving the allowlist from the changed files would make the check a
+            # no-op: every path the PR touches would be allowed by construction.
+            # No trusted allowlist means nobody has said what Dependabot may touch.
+            return Decision("review-required", "no-trusted-allowlist", risk="review-required")
     elif kind == "python_bump":
         allowed = list((identities.get("python_bump") or {}).get("allowed_files") or [".python-version"])
     diff_kind = "python-bump" if kind == "python_bump" else str(snapshot.get("diff_kind") or "dependabot")
@@ -832,15 +902,14 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
     if status != 200 or not isinstance(pr, dict):
         return Decision("fail", f"pr-api:{status}")
     head_sha = str((pr.get("head") or {}).get("sha") or head_sha)
-    status, checks_payload = _github_json(
-        f"https://api.github.com/repos/{owner}/{name}/commits/{head_sha}/check-runs?per_page=100&filter=latest",
+    # Paginated, and bounded: a commit with more than one page of check runs must
+    # not be judged on the first hundred, and an unreadable list is not a green one.
+    status, check_runs = _api_pages(
+        f"https://api.github.com/repos/{owner}/{name}/commits/{head_sha}/check-runs?per_page=100&filter=latest&page=1",
         token,
     )
     if status != 200:
         return Decision("fail", f"checks-api:{status}")
-    check_runs = []
-    if isinstance(checks_payload, dict) and isinstance(checks_payload.get("check_runs"), list):
-        check_runs = checks_payload["check_runs"]
     status, files = _api_pages(
         f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/files?per_page=100&page=1",
         token,
@@ -859,18 +928,22 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         f"https://api.github.com/repos/{owner}/{name}/commits/{head_sha}/status",
         token,
     )
-    legacy = []
-    if status == 200 and isinstance(statuses, dict):
-        legacy = statuses.get("statuses") or []
-        if any(str(s.get("state")) == "failure" for s in legacy if isinstance(s, dict)):
-            pass
+    if status != 200:
+        # Legacy commit statuses are part of the required evidence. Treating an
+        # unreadable response as "no statuses" would let a failing context vanish.
+        return Decision("fail", f"statuses-api:{status}")
+    legacy = statuses.get("statuses") or [] if isinstance(statuses, dict) else []
+    if not isinstance(legacy, list):
+        return Decision("fail", "statuses-malformed")
     risk = snapshot_risk_from_files(files if isinstance(files, list) else [], kind_hint=trusted_updater(pr, profile.get("updater_identities") or {}))
     allowed = []
     kind = trusted_updater(pr, profile.get("updater_identities") or {})
     if kind == "python_bump":
         allowed = list((profile.get("updater_identities") or {}).get("python_bump", {}).get("allowed_files") or [".python-version"])
     elif kind == "dependabot":
-        allowed = [str(item.get("filename") or "") for item in files if isinstance(item, dict)]
+        # Trusted base policy only. Reading this from the changed files would let
+        # the PR define its own allowlist.
+        allowed = list(profile.get("dependabot_allowed_files") or [])
     return {
         "repository": full_name,
         "head_sha": head_sha,
@@ -881,6 +954,7 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         "legacy_statuses": legacy if isinstance(legacy, list) else [],
         "risk": risk,
         "allowed_files": allowed,
+        "trusted_allowed_files": allowed,
         "diff_kind": "python-bump" if kind == "python_bump" else "dependabot",
         "variables": {
             "AUTO_MERGE_DEPENDABOT": os.environ.get("AUTO_MERGE_DEPENDABOT", ""),
@@ -896,6 +970,99 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
             "dependabot_allowed_files": allowed,
         },
     }
+
+
+_USES_BODY = re.compile(r"uses:\s*([^\s@#]+)@([0-9a-fA-F]{40}|[^\s#]+)(.*)$")
+
+
+def _classify_workflow_patch(patch: str, filename: str) -> list[dict[str, Any]]:
+    """Classify the actual Action transitions in a workflow diff.
+
+    Calling any YAML diff without a policy keyword a routine "action-pin" lets an
+    Action source change or a major-version bump through as routine. A workflow
+    diff that moves no `uses:` line is not a pin bump at all and needs review.
+    """
+    removed: dict[str, tuple[str, str, str]] = {}
+    added: dict[str, tuple[str, str, str]] = {}
+    order: list[str] = []
+    for line in patch.splitlines():
+        if not line or line[0] not in "+-" or line.startswith(("---", "+++")):
+            continue
+        match = _USES_BODY.search(line[1:])
+        if not match:
+            continue
+        action, ref, rest = match.group(1), match.group(2), match.group(3)
+        key = action.lower()
+        if key not in order:
+            order.append(key)
+        if line[0] == "-":
+            removed[key] = (action, ref, rest)
+        else:
+            added[key] = (action, ref, rest)
+    if not order:
+        return [{"risk": "review-required", "auto_eligible": False,
+                 "reason": "workflow-non-pin-change", "name": filename}]
+    out: list[dict[str, Any]] = []
+    for key in order:
+        old, new = removed.get(key), added.get(key)
+        if old is None or new is None:
+            # An Action appearing on only one side is an added or removed
+            # dependency, not a pin bump of something already trusted.
+            out.append({"risk": "review-required", "auto_eligible": False,
+                        "reason": "action-added-or-removed", "name": filename})
+            continue
+        member = classify_action_update(
+            old[1], new[1],
+            old_action=old[0], new_action=new[0],
+            comment_old=old[2], comment_new=new[2],
+        )
+        member["name"] = filename
+        out.append(member)
+    return out
+
+
+def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, Any]]:
+    """Classify every package transition in a requirements diff, not just the last.
+
+    A grouped update can carry several packages in one file. Collapsing the diff to
+    a single old/new pair let a routine patch later in the file silently overwrite a
+    major bump earlier in it, and the whole PR was then auto-merged as routine.
+    Additions, removals and unparseable patches all require review.
+    """
+    removed: dict[str, str] = {}
+    added: dict[str, str] = {}
+    order: list[str] = []
+    saw_change = False
+    for line in patch.splitlines():
+        if line.startswith(("---", "+++")):
+            continue
+        match = re.match(r"^([-+])([A-Za-z0-9_.-]+)==([0-9A-Za-z.]+)", line)
+        if not match:
+            continue
+        saw_change = True
+        sign, pkg, ver = match.group(1), match.group(2).lower(), match.group(3)
+        if pkg not in order:
+            order.append(pkg)
+        if sign == "-":
+            removed[pkg] = ver
+        else:
+            added[pkg] = ver
+    unparsed = {"risk": "review-required", "auto_eligible": False,
+                "reason": "requirements-patch-unparsed", "name": filename}
+    if not saw_change:
+        return [unparsed]
+    out: list[dict[str, Any]] = []
+    for pkg in order:
+        old, new = removed.get(pkg), added.get(pkg)
+        if old is None and new is None:
+            continue
+        member = classify_package_update(old, new, name=pkg)
+        if old is None:
+            member.update(reason="package-added", risk="review-required", auto_eligible=False)
+        elif new is None:
+            member.update(reason="package-removed", risk="review-required", auto_eligible=False)
+        out.append(member)
+    return out or [unparsed]
 
 
 def snapshot_risk_from_files(files: Sequence[Mapping[str, Any]], kind_hint: str | None) -> dict[str, Any]:
@@ -921,23 +1088,13 @@ def snapshot_risk_from_files(files: Sequence[Mapping[str, Any]], kind_hint: str 
             else:
                 members.append({"risk": "review-required", "auto_eligible": False, "reason": "pin-unparsed"})
         elif name in {"requirements.txt", "requirements.in", "requirements-dev.txt", "requirements-dev.in"}:
-            old_ver = new_ver = None
-            pkg = Path(name).stem
-            for line in patch.splitlines():
-                match = re.match(r"^[-+]([A-Za-z0-9_.-]+)==([0-9A-Za-z.]+)", line)
-                if not match:
-                    continue
-                pkg, ver = match.group(1), match.group(2)
-                if line.startswith("-"):
-                    old_ver = ver
-                else:
-                    new_ver = ver
-            members.append(classify_package_update(old_ver, new_ver, name=pkg))
+            members.extend(_classify_requirements_patch(patch, name))
         elif name.endswith((".yml", ".yaml")):
             if diff_touches_workflow_policy(patch):
-                members.append({"risk": "review-required", "auto_eligible": False, "reason": "workflow-policy-change"})
+                members.append({"risk": "review-required", "auto_eligible": False,
+                                "reason": "workflow-policy-change", "name": name})
             else:
-                members.append({"risk": "routine", "auto_eligible": True, "reason": "action-pin"})
+                members.extend(_classify_workflow_patch(patch, name))
         else:
             members.append({"risk": "review-required", "auto_eligible": False, "reason": f"path:{name}"})
     if kind_hint == "python_bump" and members:

