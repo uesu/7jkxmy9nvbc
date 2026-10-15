@@ -1,0 +1,5 @@
+{
+  "_note": "SYNTHETIC: the child's own slugged permalink appears BEFORE the original link. Identity must be compared by post ID, not by full path string versus a truncated regex match.",
+  "own_path": "/r/AnantaLeaks/comments/1x6h1mf/phone_stealing_from_aphotide/",
+  "text": "u/x crossposted this from r/AnantaLeaks https://www.reddit.com/r/AnantaLeaks/comments/1x6h1mf/a_different_slug/ then linked the original https://www.reddit.com/user/aphotide/comments/1x6h1a5/phone_stealing_from_aphotide/"
+}

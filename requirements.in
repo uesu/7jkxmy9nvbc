@@ -1,0 +1,17 @@
+# Runtime requirements — human-maintained INPUT only.
+#
+# requirements.txt is GENERATED from this file. Do not hand-edit it.
+# Regenerate with the fixed compiler contract (see .github/scripts/ci.py
+# `lockfiles` / docs in the development repository):
+#
+#   python -m piptools compile --generate-hashes --allow-unsafe \
+#     --resolver=backtracking --strip-extras \
+#     --output-file=requirements.txt requirements.in
+#
+# Ranges are deliberate lower bounds; the generated lock pins the exact
+# graph, so ordinary in-range releases are no longer silently adopted at
+# install time.
+
+feedparser>=6.0.14,<7
+aiohttp>=3.14.5,<4
+python-dotenv>=1.2.4,<2

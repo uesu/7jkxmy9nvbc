@@ -1,0 +1,41 @@
+# Ruff configuration — pinned ruff 0.17.0 (see requirements-dev.txt).
+#
+# Scope: the maintenance helpers and their tests ONLY. The maintained engines
+# under "testing area/" and the pre-existing regression suites are legacy lint
+# debt, enumerated in .github/maintenance.json -> checks.lint_debt_exempt and
+# deliberately NOT mass-formatted by this change.
+#
+# target-version follows the single runtime pin in .python-version.
+target-version = "py314"
+line-length = 100
+
+include = [
+  ".github/scripts/maintenance.py",
+  ".github/scripts/ci.py",
+  ".github/scripts/python_version_bump.py",
+  ".github/scripts/render_run_summary.py",
+  "tests/test_maintenance.py",
+  "tests/test_run_summary.py",
+  "tests/test_configuration_contract.py",
+]
+
+[lint]
+select = [
+  "E", "W", "F",      # pycodestyle + pyflakes: real defects
+  "I",                # import order
+  "B",                # bugbear
+  "UP",               # modern syntax for the pinned interpreter
+  "SIM",              # simplification
+  "C4", "PIE",        # comprehension / call correctness
+  "TRY", "BLE",       # exception hygiene
+  "PERF",             # avoidable work in a hot path
+  "ISC",              # string-concatenation clarity
+  "EXE",              # shebang/executable consistency
+  "RUF",              # ruff's own checks
+]
+
+[lint.per-file-ignores]
+# Telemetry must never break a monitor run: these swallow their own errors on
+# purpose, and each site is commented at the call.
+"testing area/run_report.py" = ["BLE001"]
+".github/scripts/python_version_bump.py" = ["TRY003"]

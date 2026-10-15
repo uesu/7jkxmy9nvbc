@@ -856,6 +856,27 @@ except Exception as _proxy_import_error:
 _proxy_health = None   # per-run warm-up result (set in main(), read in resolve_post_media)
 
 
+def _media_satisfies(result, need_video: bool = False) -> bool:
+    """Does a proxy result actually answer the request that was made?
+
+    A non-empty media list satisfies an ordinary request. When a VIDEO was
+    asked for, only an actual motion-video item does: a poster, an
+    ``external-preview`` thumbnail or an audio-with-cover rendering is not
+    video evidence and must not hide a valid equivalent route (2026-10-15,
+    incident AnantaLeaks_1x6h1mf).
+    """
+    if not (isinstance(result, dict) and result.get("media")):
+        return False
+    if not need_video:
+        return True
+    return any(
+        isinstance(item, dict)
+        and item.get("kind") == "video"
+        and not item.get("audio_cover_only")
+        for item in result["media"]
+    )
+
+
 async def fetch_proxy_post_memo(session, path: str, label: str = "", health=None, need_video: bool = False):
     """Per-run memo around reddit_proxy.fetch_proxy_post.
 
@@ -874,14 +895,26 @@ async def fetch_proxy_post_memo(session, path: str, label: str = "", health=None
     # post as "/r/u_<name>/comments/<id>/", and the proxy services disagree
     # about which route they serve. Only a profile post HAS an alias, so an
     # ordinary subreddit post never makes this second call.
-    if not (isinstance(result, dict) and result.get("media")):
+    #
+    # 2026-10-15 (incident AnantaLeaks_1x6h1mf): a non-empty media list is NOT
+    # sufficient when a video was asked for. A poster/thumbnail answer on the
+    # /user/ route used to stop the equivalent /r/u_.../ alias attempt, so a
+    # valid video on the alias was never reached. `need_video` now means
+    # "motion video", end to end.
+    if not _media_satisfies(result, need_video):
         for alias in _path_aliases(path)[1:]:
             alt = await reddit_proxy.fetch_proxy_post(session, alias, label=label,
                                                       health=health,
                                                       need_video=need_video)
-            if isinstance(alt, dict) and alt.get("media"):
+            if _media_satisfies(alt, need_video):
+                if isinstance(result, dict) and result.get("media"):
+                    # Keep the poster/text fallback available to the caller
+                    # while the alias result wins.
+                    alt = dict(alt, fallback_media=result.get("media"))
                 logging.info(f"[{label or 'proxy'}] profile post resolved via "
-                             f"its subreddit alias {alias}")
+                             f"its subreddit alias {alias}"
+                             + (" (video found on the alias)"
+                                if need_video else ""))
                 result = alt
                 break
     if use_cache and result:
@@ -1287,25 +1320,182 @@ def extract_post_id(path: str) -> str | None:
 CROSSPOST_PERMALINK_RE = re.compile(
     r"/(?:r/[^/\s?<>]+|u(?:ser)?/[^/\s?<>]+)/comments/[a-zA-Z0-9]+/")
 
+# Crosspost-original identity (2026-10-15 incident AnantaLeaks_1x6h1mf):
+# a post's identity is its base36 post ID, NOT the string of the route that
+# happens to name it. '/user/aphotide/comments/1x6h1a5/phone_stealing/',
+# '/u/aphotide/comments/1x6h1a5/x/' and '/r/u_aphotide/comments/1x6h1a5/' are
+# the SAME post, and a child's own permalink with a different slug must never
+# be mistaken for its parent.
+POST_ID_RE = re.compile(r"^[a-zA-Z0-9]{4,12}$")
+REDDIT_COMMENT_ID_RE = re.compile(r"/comments/([a-zA-Z0-9]{4,12})(?:/|$|\?)")
+REDDIT_PERMITTED_HOSTS = frozenset({
+    "reddit.com", "www.reddit.com", "old.reddit.com", "new.reddit.com",
+    "np.reddit.com", "i.reddit.com", "amp.reddit.com", "gateway.reddit.com",
+})
+REDDIT_LINK_RE = re.compile(
+    r"(?i)https?://([a-z0-9][a-z0-9.\-]*)?(/(?:r|u|user)/[^\s\"'<>)\]]+)")
+# An explicitly identified parent, without the literal English word
+# "crosspost": the mirror's own parent marker in a matched-post context.
+PARENT_MARKER_RE = re.compile(r"(?i)\bcrosspost\w*\b|\boriginal\s*post(?!(?-i:[a-z]))")
+ANY_URL_RE = re.compile(r"(?i)https?://[^\s\"'<>)\]]+")
 
-def find_crosspost_original_path(text: str | None, own_path: str | None = None) -> str | None:
+
+def canonical_post_id(value: str | None) -> str | None:
+    """The base36 post identity of a permalink, ID or bare ID string.
+
+    Slug text, query strings, trailing slashes, profile aliases and Reddit's
+    ``t3_`` fullname prefix are all irrelevant to identity, so they are
+    discarded here and never compared.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    match = REDDIT_COMMENT_ID_RE.search(text)
+    if match:
+        return match.group(1)
+    # Reddit fullnames ("t3_1x6h1a5") name the same post as the bare ID.
+    fullname = re.match(r"^(?:t[12368])_([a-zA-Z0-9]{4,12})$", text)
+    if fullname:
+        return fullname.group(1)
+    match = re.fullmatch(r"[a-zA-Z0-9]{4,12}", text)
+    return match.group(0) if match else None
+
+
+def is_same_post(a: str | None, b: str | None) -> bool:
+    """True when two permalinks/IDs name the same post, ignoring route form."""
+    id_a, id_b = canonical_post_id(a), canonical_post_id(b)
+    return bool(id_a) and id_a == id_b
+
+
+def _permitted_reddit_link(url: str) -> bool:
+    """A full URL is only a parent candidate on a reddit.com host."""
+    match = re.match(r"(?i)^https?://([^/]+)", url or "")
+    if not match:
+        return True  # scheme-relative/path-only: nothing to reject here
+    host = match.group(1).split("@")[-1].split(":")[0].lower()
+    return host in REDDIT_PERMITTED_HOSTS or host.endswith(".reddit.com")
+
+
+def find_crosspost_original_path(text: str | None, own_path: str | None = None,
+                                 *, parent_id: str | None = None,
+                                 structured_parent: dict | None = None) -> str | None:
     """
     Round 14 crosspost detection: a crosspost's content (RSS content, redlib
     post area, proxy body) contains the word 'crosspost' AND a permalink to
     the ORIGINAL post ("u/x crossposted this from r/Y — original post").
     Returns the original path '/r/<sub>/comments/<id>/' or None.
+
+    2026-10-15 corrections (incident AnantaLeaks_1x6h1mf):
+
+    * structured parent metadata (``structured_parent``) and an explicit
+      parent ID (``parent_id``) are honoured even when the English word
+      "crosspost" is absent — a parent relationship that is already
+      established needs no keyword to prove it;
+    * the mirror's own explicit parent marker ("Original Post") counts too,
+      but only inside a matched-post context, so arbitrary body links are
+      still not parents;
+    * self-links are rejected by canonical post ID, so a child's own
+      permalink (any slug, alias, query or trailing slash) can never be
+      returned as its "original";
+    * malformed IDs and foreign hosts are rejected.
     """
-    if not text or "crosspost" not in text.lower():
+    own_id = canonical_post_id(own_path)
+
+    # 1. Structured parent metadata already proves the relationship.
+    if isinstance(structured_parent, dict):
+        candidate = (structured_parent.get("path")
+                     or structured_parent.get("permalink")
+                     or structured_parent.get("id"))
+        candidate_id = canonical_post_id(candidate)
+        if candidate_id and candidate_id != own_id:
+            normalized = normalize_reddit_path(str(candidate) + "/")
+            if normalized:
+                return normalized
+            if POST_ID_RE.match(candidate_id):
+                return f"/comments/{candidate_id}/"
+
+    # 2. An explicit parent ID from the matching record.
+    parent = canonical_post_id(parent_id)
+    if parent and parent != own_id:
+        return f"/comments/{parent}/"
+
+    if not text:
         return None
-    own = (own_path or "").rstrip("/")
+    if not PARENT_MARKER_RE.search(text):
+        # Not a matched-post parent context: arbitrary body links are not
+        # parent candidates, and this is deliberately NOT "first link wins".
+        return None
+
+    # A permalink-looking path inside a FOREIGN-host URL is not a Reddit
+    # parent, so remember which spans belong to a non-reddit.com URL.
+    foreign_spans = [
+        m.span() for m in ANY_URL_RE.finditer(text)
+        if not _permitted_reddit_link(m.group(0))
+    ]
+
+    def _is_foreign(span: tuple[int, int]) -> bool:
+        return any(start <= span[0] < end for start, end in foreign_spans)
+
+    # Permalink scan first: this preserves the historical returned form
+    # ('/r/<sub>/comments/<id>/' for a subreddit post, the full canonical
+    # '/user/<name>/comments/<id>/<slug>/' for a profile post). What changed
+    # is only how SELF links and foreign hosts are rejected — by canonical
+    # post ID and verified host, not by comparing a full path string against
+    # a truncated regex match.
     for m in CROSSPOST_PERMALINK_RE.finditer(text):
-        p = m.group(0).rstrip("/")
-        if p and p == own:
-            continue  # the post's own permalink, not the original
-        # Round 47: '/u/<name>/comments/...' is the same post as
-        # '/user/<name>/comments/...'; store the canonical form.
-        return normalize_reddit_path(p + "/") or (p + "/")
+        if _is_foreign(m.span()):
+            continue
+        raw = m.group(0)
+        candidate_id = canonical_post_id(raw)
+        if not candidate_id or candidate_id == own_id:
+            continue
+        return normalize_reddit_path(raw.rstrip("/") + "/") or (raw.rstrip("/") + "/")
+
+    # Fallback: a full reddit.com URL whose path form the permalink regex did
+    # not catch. Host is verified here, so this is not "first link wins".
+    for m in REDDIT_LINK_RE.finditer(text):
+        if _is_foreign(m.span()) or not _permitted_reddit_link(m.group(0)):
+            continue
+        candidate_id = canonical_post_id(m.group(2))
+        if not candidate_id or candidate_id == own_id:
+            continue
+        normalized = normalize_reddit_path(m.group(2).rstrip("/") + "/")
+        if normalized:
+            return normalized
     return None
+
+
+def crosspost_parent_from_json(post_json: dict | None) -> tuple[dict | None, str | None]:
+    """Standard structured parent metadata from a Reddit post dict.
+
+    Returns ``(parent_record_or_None, parent_id_or_None)``. Reddit carries the
+    relationship in ``crosspost_parent_list`` (a one-element list of the
+    parent post) and in the flat ``crosspost_parent_id``; the older
+    ``crosspost_post_link`` string is a convenience, not the only evidence, and
+    is not always present.
+    """
+    if not isinstance(post_json, dict):
+        return None, None
+    parents = post_json.get("crosspost_parent_list")
+    if isinstance(parents, list):
+        for entry in parents:
+            if not isinstance(entry, dict):
+                continue
+            parent_id = canonical_post_id(entry.get("id") or entry.get("name")
+                                          or entry.get("permalink"))
+            if parent_id:
+                record = {
+                    "id": parent_id,
+                    "path": normalize_reddit_path(str(entry.get("permalink") or "") + "/"),
+                    "author": entry.get("author"),
+                    "provenance": "crosspost_parent_list",
+                }
+                return record, parent_id
+    flat = canonical_post_id(post_json.get("crosspost_parent_id"))
+    if flat:
+        return {"id": flat, "path": None, "provenance": "crosspost_parent_id"}, flat
+    return None, None
+
 
 
 def _crosspost_notice_clean(body: str | None, title: str | None) -> tuple:
@@ -3497,6 +3687,27 @@ def extract_vreddit_id(text: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def video_id_from_proxy_url(url: str | None) -> str | None:
+    """The Reddit video ID carried inside a proxy render URL.
+
+    Proxy services hand back ``render/video.mp4?videoUrl=<percent-encoded
+    v.redd.it URL>&audioUrl=...``. The child post ID is NOT the media ID, so a
+    crosspost child with no video of its own must inherit the ORIGINAL's
+    verified video ID here or the existing bounded 1080p quality selector is
+    silently skipped (2026-10-15, incident AnantaLeaks_1x6h1mf).
+    """
+    if not url:
+        return None
+    found = extract_vreddit_id(url)
+    if found:
+        return found
+    try:
+        from urllib.parse import unquote
+        return extract_vreddit_id(unquote(str(url)))
+    except Exception:
+        return None
+
+
 def extract_redgifs_url(text: str | None) -> str | None:
     m = REDGIFS_RE.search(text or "")
     if not m:
@@ -4145,10 +4356,22 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
     # post; the card keeps the crosspost URL + the "🔁 Crosspost of" line.
     fetch_path = path
     if not post_json and base.get("crosspost_orig_path"):
-        fetch_path = base["crosspost_orig_path"]
-        crosspost = {"url": f"https://www.reddit.com{fetch_path}", "path": fetch_path}
-        logging.info(f"[{label or 'native'}] crosspost — media/stats from the "
-                     f"original post {fetch_path}")
+        candidate_path = base["crosspost_orig_path"]
+        # A parent relationship is one hop to a DIFFERENT post. A child's own
+        # permalink under another slug or profile alias is a self-link, not an
+        # original, and following it would silently re-resolve the child.
+        if is_same_post(candidate_path, path):
+            logging.info(f"[{label or 'native'}] ignoring a self-referential "
+                         f"crosspost parent ({candidate_path} is this post).")
+        else:
+            fetch_path = candidate_path
+            crosspost = {"url": f"https://www.reddit.com{fetch_path}", "path": fetch_path}
+            logging.info(f"[{label or 'native'}] crosspost — media/stats from the "
+                         f"original post {fetch_path}")
+    # The posting identity never follows the media source: the card keeps the
+    # CHILD's id, permalink, webhook route and dedup key. `media_source_path`
+    # only records where media came from.
+    media_source_path = fetch_path
 
     # Resolve archive crossposts BEFORE asking proxies for media. Keep the
     # crosspost thread/title/author on the card; media comes from its original.
@@ -4160,17 +4383,45 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
             original_path = original.get("permalink")
             if (isinstance(original_path, str)
                     and re.fullmatch(r"/(?:r|user)/[^/]+/comments/[a-z0-9]+/[^?#]*",
-                                     original_path)):
+                                     original_path)
+                    and not is_same_post(original_path, path)):
                 fetch_path = original_path
+                media_source_path = fetch_path
                 crosspost = {"url": f"https://www.reddit.com{fetch_path}", "path": fetch_path}
                 arctic = original
                 logging.info(f"[{label}] crosspost detected via Arctic Shift: {fetch_path}")
+        # 2026-10-15 (incident AnantaLeaks_1x6h1mf): the matching archive
+        # record can carry standard structured parent metadata even when the
+        # RSS/proxy text never used the word "crosspost". One bounded lookup of
+        # that parent — no recursive scrape, no arbitrary URL fetching.
+        if not crosspost:
+            _record, _parent_id = crosspost_parent_from_json(arctic)
+            if _parent_id and not is_same_post(_parent_id, path):
+                parent_path = (_record or {}).get("path") or f"/comments/{_parent_id}/"
+                parent_json = await fetch_arctic_post(session, _parent_id, label)
+                if parent_json:
+                    fetch_path = parent_path
+                    media_source_path = fetch_path
+                    crosspost = {"url": f"https://www.reddit.com{fetch_path}",
+                                 "path": fetch_path}
+                    arctic = parent_json
+                    logging.info(f"[{label}] crosspost parent from structured "
+                                 f"archive metadata: {_parent_id} -> {fetch_path}")
     arctic_items = arctic_gallery_items(arctic)
     a_vid, a_fb = arctic_video_info(arctic)
     arctic_is_video = bool(a_vid)
     if a_vid:
         vid, fallback_url = a_vid, a_fb
         has_video = True
+    # 2026-10-15 (incident AnantaLeaks_1x6h1mf): the image branches below used
+    # to be guarded by `not arctic_is_video` alone, so an archive MISS let an
+    # image-only proxy answer win and set proxy_media_used=True — which then
+    # blocked the native video chain underneath. Video evidence is now retained
+    # independently of any image fallback: a verified v.redd.it ID, a matched
+    # reddit_video object or a known source video candidate all count. An
+    # external-preview thumbnail by itself is not video evidence.
+    video_expected = bool(has_video or vid or arctic_is_video
+                          or base.get("vred_id") or base.get("redgifs_url"))
     # Structured text wins over flattened og descriptions. Archive text is
     # used only when the RSS/redlib body is empty.
     if arctic and not (body or "").strip():
@@ -4196,6 +4447,11 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
     # posts (the DASH chain handles those). Any failure here simply falls
     # through to the round-12 native path.
     proxy_media_used = False
+    # Image items a proxy returned for a post that is known to carry a
+    # video. Held as a bounded poster/text fallback ONLY: they never mark
+    # the proxy as the media source, so the native video chain still runs.
+    proxy_poster_fallback: list[dict] = []
+    video_quality_upgraded = False
     redlib_items: list[dict] = []
     redlib_done = False
     if not post_json and PROXY_MEDIA and reddit_proxy is not None and fetch_path:
@@ -4243,10 +4499,23 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 # Reddit video — the validated proxy result is the held base,
                 # so this can only ever improve it (video-only; the helper
                 # returns the base unchanged on any failure).
+                #
+                # 2026-10-15: the media ID is the ORIGINAL's verified Reddit
+                # video ID, not the child post ID. Recovering a playable
+                # default-720p source embed must not skip the existing bounded
+                # 1080p opportunity just because the child carried no video ID.
+                _q_vid = (vid
+                          or video_id_from_proxy_url(proxy_video["url"])
+                          or extract_vreddit_id(proxy.get("body") or ""))
+                if not vid and _q_vid:
+                    logging.info(f"[{label or 'proxy'}] inherited media id "
+                                 f"{_q_vid} from the matched original's video URL "
+                                 f"for the quality selector.")
                 _q_url = await proxy_video_quality_upgrade(
-                    session, vid, proxy_video["url"], label or "proxy")
+                    session, _q_vid, proxy_video["url"], label or "proxy")
                 if _q_url and _q_url != proxy_video["url"]:
                     proxy_video = dict(proxy_video, url=_q_url)
+                    video_quality_upgraded = True
                 # video post: the proxy's muxed mp4 tile ONLY (never a dup
                 # first-frame thumbnail)
                 media = [proxy_video]
@@ -4254,7 +4523,7 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 proxy_media_used = True
                 logging.info(f"[{label or 'proxy'}] card media via "
                              f"{_provider_for_url(proxy_video['url'])} — 1 video tile.")
-            elif (not video_dead and not arctic_is_video and redlib_items
+            elif (not video_dead and not video_expected and redlib_items
                   and any(x["kind"] == "video" for x in redlib_items)):
                 # round 38c: a redlib gallery WITH a video item is the most
                 # complete source — every photo + the video tile (1wt59lm)
@@ -4264,12 +4533,12 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 proxy_media_used = True
                 logging.info(f"[{label or 'proxy'}] card media via redlib harvest "
                              f"(gallery video) — {len(media)} item(s).")
-            elif (not video_dead and not arctic_is_video and arctic_items
+            elif (not video_dead and not video_expected and arctic_items
                   and len(arctic_items) >= max(1, len(proxy_images))):
                 media = [dict(item) for item in arctic_items]
                 _use_proxy_text()
                 proxy_media_used = True
-            elif (not video_dead and not arctic_is_video and redlib_items
+            elif (not video_dead and not video_expected and redlib_items
                   and len(redlib_items) >= max(1, len(proxy_images))):
                 # image post: the COMPLETE ordered gallery from the redlib
                 # harvest — it lists EVERY item incl. GIFs (the redditez og
@@ -4281,12 +4550,26 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
                 logging.info(f"[{label or 'proxy'}] card media via redlib harvest "
                              f"— {len(media)} item(s) (body/stats via "
                              f"{proxy['service']}).")
-            elif not video_dead and not arctic_is_video and proxy_images:
+            elif not video_dead and not video_expected and proxy_images:
                 media = proxy_images
                 _use_proxy_text()
                 proxy_media_used = True
                 logging.info(f"[{label or 'proxy'}] card media via {proxy['service']} "
                              f"— {len(media)} item(s).")
+            elif not video_dead and video_expected and proxy_images:
+                # 2026-10-15 (incident AnantaLeaks_1x6h1mf): an image-only
+                # proxy answer for a post with established video evidence.
+                # Keep the poster/text/stats as a bounded fallback, but do NOT
+                # mark the proxy as the media source — a poster must never
+                # suppress the native video chain underneath, which is the only
+                # thing that can still produce the real video.
+                _use_proxy_text()
+                proxy_poster_fallback = [dict(x) for x in proxy_images]
+                logging.info(f"[{label or 'proxy'}] {proxy['service']} returned "
+                             f"{len(proxy_poster_fallback)} image item(s) for a post "
+                             f"with established video evidence — keeping them only "
+                             f"as a text/stats/poster fallback and running the "
+                             f"native video chain.")
             else:
                 # no usable proxy media (a dead proxy video counts too — the
                 # native DASH chain has audio)
@@ -4424,6 +4707,24 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
         logging.info(f"[{label or 'native'}] crosspost detected via the mirror's "
                      f"notice (original subreddit r/{_notice_sub}) — notice text "
                      f"removed from the body.")
+    # 2026-10-15 (incident AnantaLeaks_1x6h1mf): the applicable video paths
+    # have now been exhausted. Only here — never before the native chain — may
+    # a held proxy poster become the card's media, and the reason is stated so
+    # "kept for text/stats" followed by an image is never summarized as a
+    # successful video.
+    media_fallback_reason = None
+    if (not media and proxy_poster_fallback
+            and not any(x["kind"] in ("video", "gif") for x in media)):
+        media = proxy_poster_fallback
+        media_fallback_reason = ("no-validated-video-after-native-chain;"
+                                 "proxy-poster-retained-as-image-fallback")
+        logging.info(f"[{label or 'proxy'}] no validated motion video was available "
+                     f"after the native chain — delivering the proxy poster as an "
+                     f"IMAGE fallback ({len(media)} item(s)). This is not a video.")
+    elif media_fallback_reason is None and video_expected and not any(
+            x["kind"] == "video" for x in media):
+        media_fallback_reason = "video-evidence-without-validated-video"
+
     # round 29 (2026-09-19): mirrors can list ONE photo under two different
     # wrapper URLs (two og:image redirects resolving to the same file) —
     # collapse to one tile. Applies to EVERY source (proxy/redlib/RSS/Arctic).
@@ -4441,6 +4742,23 @@ async def resolve_post_media(session: aiohttp.ClientSession, base: dict,
         "youtube_id": yt_vid,
         "youtube_live": yt_live,
         "full_mode": bool(post_json),
+        # Selected identity/outcome, observable. The CHILD keeps the posting
+        # identity (id, permalink, webhook route, dedup key); `media_source`
+        # only records where the media actually came from, how the parent was
+        # discovered, and why any fallback was taken.
+        "media_source": {
+            "path": media_source_path,
+            "is_crosspost_original": bool(crosspost) and media_source_path != path,
+            "provenance": ("structured-parent" if crosspost and str(
+                               (crosspost or {}).get("provenance") or "").startswith("crosspost_parent")
+                           else "arctic-archive" if crosspost and arctic
+                           else "matched-post-text" if crosspost else "self"),
+            "video_expected": bool(video_expected),
+            "media_kinds": sorted({str(x.get("kind")) for x in media}),
+            "provider": _provider_for_url(media[0]["url"]) if media else None,
+            "fallback_reason": media_fallback_reason,
+            "quality_upgraded": video_quality_upgraded,
+        },
     }
 
 

@@ -120,6 +120,16 @@ except Exception as e:  # only when the file is absent from the repo
     twitter_proxy = None
     logging.warning(f"twitter_proxy unavailable ({e}) — using direct FxTwitter only.")
 
+# Structured run report (replaces the old timestamp-sensitive awk/grep summary
+# counters). Soft import: without the module the monitor behaves exactly as
+# before, and the workflow footer reports the summary as unavailable instead of
+# inventing counters from formatted log lines.
+try:
+    import run_report as _run_report
+except Exception as _e:  # only when the file is absent from the repo
+    _run_report = None
+    logging.warning(f"run_report unavailable ({_e}) — no structured run report this run.")
+
 # Round 53: empty (an unset-but-wired secret) means "not configured", so the
 # documented default list still applies — os.getenv(name, default) would not.
 ACCOUNTS_STR = (os.getenv("ACCOUNTS") or "").strip() or "TYPEII_EN,PomPom_HonkaiSR,Wuthering_Waves,HonkaiNA,Ananta_EN"
@@ -1413,7 +1423,7 @@ class _TestFeed:
         self.entries = entries
 
 
-async def fetch_working_feed(session: aiohttp.ClientSession, account: str):
+async def fetch_working_feed(session: aiohttp.ClientSession, account: str, report=None):
     # round 12 (2026-09-17): every attempt is logged. Before this, a dead
     # nitter fleet made the whole monitor a silent no-op (zero log lines —
     # the missed 2026-09-17 Wuthering_Waves/2100555373073797461 tweet).
@@ -1434,24 +1444,53 @@ async def fetch_working_feed(session: aiohttp.ClientSession, account: str):
                            "Authorization": f"Bearer {token}",
                            "User-Agent": f"Mozilla/5.0 {token}"}
             feed_url = f"{feed_url}?token={url_quote(token, safe='')}"
+        if report is not None:
+            report.note_host(instance)
+            report.note_request()
         try:
             async with session.get(feed_url, headers=req_headers,
                                    timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     content = await response.text()
                     feed = await asyncio.to_thread(feedparser.parse, content)
+                    if report is not None:
+                        report.incr("feeds.http_ok")
                     if feed.entries:
                         logging.info(f"[{account}] feed OK via {instance} — "
                                      f"{len(feed.entries)} entries.")
+                        if report is not None:
+                            report.note_host(instance, selected=True)
+                            report.incr("feeds.parsed")
+                            report.note_target(account, usable=True)
                         return feed
+                    # HTTP 200 is NOT a usable feed: an empty body here is the
+                    # instance's bot-check/stale answer, counted separately
+                    # from a genuine parse and from a transport failure.
                     logging.info(f"[{account}] {instance}: HTTP 200 but 0 entries "
                                  f"(bot check / stale instance?) — trying next.")
+                    if report is not None:
+                        report.incr("feeds.challenged")
                 else:
                     logging.info(f"[{account}] {instance}: HTTP {response.status} — "
                                  f"trying next.")
+                    if report is not None:
+                        if response.status == 429:
+                            report.incr("feeds.rate_limited")
+                        else:
+                            report.incr("feeds.invalid")
+        except asyncio.CancelledError:
+            # A race cancellation is not a proven dead host.
+            if report is not None:
+                report.incr("feeds.cancelled")
+            raise
         except Exception as e:
             logging.info(f"[{account}] {instance}: {type(e).__name__}: {e} — "
                          f"trying next.")
+            if report is not None:
+                if isinstance(e, (asyncio.TimeoutError, TimeoutError)):
+                    report.incr("feeds.timeouts")
+                else:
+                    report.incr("feeds.invalid")
     logging.warning(f"[{account}] NO working nitter instance this run — "
                     f"account skipped (see TEST_TWEET_ID to rebuild one tweet).")
     return None
@@ -1607,6 +1646,11 @@ def build_v3_payload(account: str, tweet: dict, read_post_url: str,
 async def main():
     if not ACCOUNTS:
         return
+    report = _run_report.RunReport.from_env() if _run_report is not None else None
+    if report is not None:
+        for account in ACCOUNTS:
+            report.note_target(account, configured=True)
+        report.set("targets.configured", len(ACCOUNTS))
     posted_urls = load_posted_urls()
     is_first_run = len(posted_urls) == 0
     now = time.time()
@@ -1634,7 +1678,7 @@ async def main():
     heal_queue: list = []
 
     async with aiohttp.ClientSession() as session:
-        feeds_tasks = [fetch_working_feed(session, acc) for acc in ACCOUNTS]
+        feeds_tasks = [fetch_working_feed(session, acc, report) for acc in ACCOUNTS]
         feeds = await asyncio.gather(*feeds_tasks)
 
         feed_pairs = list(zip(ACCOUNTS, feeds))
@@ -1669,17 +1713,28 @@ async def main():
         for account, feed in feed_pairs:
             if not feed or not feed.entries:
                 logging.info(f"[{account}] skipping — no feed / 0 entries.")
+                if report is not None:
+                    report.incr("outcomes.skipped")
+                    report.note_reason("skipped.", "no-usable-feed")
                 continue
             webhook_url = get_webhook_for_account(account)
             if not webhook_url:
                 logging.warning(f"[{account}] skipping — no webhook configured "
                                 f"(set WEBHOOK_{re.sub(r'[^A-Za-z0-9]', '_', account).upper()}"
                                 f" or DISCORD_WEBHOOK_URL).")
+                if report is not None:
+                    report.incr("outcomes.skipped")
+                    report.note_reason("skipped.", "no-webhook")
                 continue
             entries = [feed.entries[0]] if is_first_run else feed.entries
+            if report is not None:
+                report.incr("outcomes.entries", len(entries))
             for entry in entries:
                 match = re.search(r"/status/(\d+)", getattr(entry, "link", ""))
                 if not match:
+                    if report is not None:
+                        report.incr("outcomes.skipped")
+                        report.note_reason("skipped.", "no-status-link")
                     continue
                 tweet_id = match.group(1)
                 unique_key = f"{account}_{tweet_id}"
@@ -1689,6 +1744,9 @@ async def main():
                             and tweet_id == t_id):
                         logging.info(f"[{unique_key}] TEST_TWEET_ID is already in the "
                                      f"posted cache — skipping by design.")
+                    if report is not None:
+                        report.incr("outcomes.skipped")
+                        report.note_reason("skipped.", "already-posted")
                     continue
 
                 published_parsed = entry.get("published_parsed")
@@ -1706,6 +1764,9 @@ async def main():
                     tweet_data = await fetch_tweet_details(session, account, tweet_id)
                     tweet_source = "fxtwitter"
                 if not tweet_data:
+                    if report is not None:
+                        report.incr("outcomes.skipped")
+                        report.note_reason("skipped.", "no-tweet-data")
                     continue
 
                 # --- canonical author/read-post URL from the payload ---
@@ -1832,6 +1893,18 @@ async def main():
                 async with session.post(target_url, json=payload) as resp:
                     if resp.status in (200, 204):
                         posted_urls.add(unique_key)
+                        if report is not None:
+                            # One successful delivery is one post — three posts
+                            # from one account are three, not one log line.
+                            report.incr("outcomes.posted")
+                            report.note_reason("posted.", "discord-ok")
+                            has_video = any(
+                                isinstance(item, dict)
+                                and isinstance(item.get("media"), dict)
+                                and "video" in str(item["media"].get("url", "")).lower()
+                                for item in (payload.get("components") and [] or [])
+                            )
+                            report.incr("media.video" if has_video else "media.image")
                         logging.info(f"V3 Posted: {unique_key} (lang={lang or 'en'}{' | article' if is_article else ''} | source={tweet_source})")
                         created = None
                         if resp.status == 200:
@@ -1855,6 +1928,10 @@ async def main():
                     else:
                         body = await resp.text()
                         logging.error(f"Discord error {resp.status} for {unique_key}: {body}")
+                        if report is not None:
+                            report.incr("outcomes.held")
+                            report.note_reason("held.", f"discord-{resp.status}")
+                            report.error(f"{unique_key}: Discord returned {resp.status}")
 
         # Round 47: self-heal AFTER every post of this run — never before.
         await heal_unresolved_media(session, heal_queue)
@@ -1865,6 +1942,15 @@ async def main():
         logging.error(f"DEDUP GUARD: {len(missing)} key(s) posted this run are "
                       f"MISSING from the saved dedup cache — they WILL be "
                       f"re-posted next run: {sorted(missing)[:10]}")
+    if report is not None:
+        if missing:
+            report.error(f"{len(missing)} posted key(s) missing from the saved dedup cache")
+        report.set("durations.monitor", report.elapsed())
+        report.mark("degraded" if missing else "completed")
+        if not report.write():
+            # Telemetry failure must never mask the application outcome.
+            logging.warning("run report could not be written — the summary will "
+                            "report it as unavailable.")
     logging.info("Twitter V3 Monitor execution finished.")
 
 

@@ -1,37 +1,84 @@
-# Dependabot — automatic dependency updates (repo Settings > Code security and
-# analysis > Dependabot alerts & security updates must be ON for security PRs;
-# version updates below work regardless).
+# Dependabot — automatic dependency updates.
 #
-# Weekly check for the pip dependencies (feedparser, aiohttp, python-dotenv)
-# and the GitHub Actions used in the workflows. Each update opens a PULL
-# REQUEST — nothing touches main until you review + merge it (or you enable
-# the opt-in auto-merge workflow — see docs/DEPENDABOT.md). The Actions job
-# reinstalls deps every run, so a merged PR changes behavior on the next
-# trigger.
+# Weekly checks for the frozen Python package graph and the SHA-pinned GitHub
+# Actions. Every update opens a PULL REQUEST; nothing touches main until
+# .github/workflows/maintenance_merge.yml validates the FINAL PR head (or the
+# maintainer merges by hand).
 #
-# To DISABLE completely: delete this file. The monitor is unaffected.
+# ROUTINE vs REVIEW-REQUIRED
+# A routine group carries allowlisted in-range patch/minor updates, which the
+# merge controller may auto-merge when AUTO_MERGE_DEPENDABOT=yes and every gate
+# passed. Anything with breaking risk — a major, a prerelease, an ambiguous
+# version, a breaking-risk 0.x minor — lands in the review-required group and
+# always waits for the maintainer. Majors are separated, never hidden behind an
+# ignore rule.
+#
+# LOCKFILES
+# requirements.txt and requirements-dev.txt are GENERATED (pip-compile with
+# hashes). Dependabot updates the pip ecosystem by regenerating them; the CI
+# `lockfiles` job fails a stale input/lock pair, and CI additionally proves the
+# committed locks regenerate byte-identically under the pinned compiler.
+#
+# There is deliberately NO GitHub Actions workflow lockfile integration: the
+# maintainer deferred that preview feature. Actions stay pinned to reviewed
+# full 40-character SHAs.
+#
+# To DISABLE completely: delete this file. The monitors are unaffected.
 version: 2
 updates:
+  # ---- routine Python dependency updates --------------------------------
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    # requirements.txt uses ranges (aiohttp>=3.14.3,<4) and every workflow run already installs
-    # the newest allowed release, so a PR for an ordinary in-range release would be noise.
-    # Open a PR when the requirement itself must change (for example a security lower-bound
-    # update or a release outside the current major range).
+    # requirements.txt / requirements-dev.txt are compiled outputs, so an
+    # ordinary in-range release is a lockfile regeneration, not a manifest edit.
     versioning-strategy: increase-if-necessary
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "python"
+      - "routine"
     commit-message:
       prefix: "deps(python)"
     groups:
-      python-deps:              # one PR for Python dependency bumps instead of one per package
+      python-routine:
         patterns: ["*"]
+        exclude-patterns:
+          # Majors and prereleases never ride in the routine group: the
+          # highest-risk member would otherwise control the whole PR.
+          - "aiohttp"
+          - "feedparser"
+          - "python-dotenv"
+        update-types:
+          - "minor"
+          - "patch"
 
+  # ---- review-required Python dependency updates ------------------------
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    versioning-strategy: increase-if-necessary
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+      - "review-required"
+    commit-message:
+      prefix: "deps(python)"
+    groups:
+      python-review-required:
+        patterns:
+          - "aiohttp"
+          - "feedparser"
+          - "python-dotenv"
+        update-types:
+          - "major"
+
+  # ---- GitHub Actions ----------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

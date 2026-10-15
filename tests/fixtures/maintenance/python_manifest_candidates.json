@@ -1,0 +1,52 @@
+[
+  {
+    "version": "3.14.8",
+    "stable": true,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.14.8-123456",
+    "files": [
+      {"platform": "linux", "arch": "x64", "filename": "python-3.14.8-linux-x64.tar.gz"},
+      {"platform": "darwin", "arch": "arm64", "filename": "python-3.14.8-darwin-arm64.tar.gz"}
+    ]
+  },
+  {
+    "version": "3.14.9",
+    "stable": true,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.14.9-123457",
+    "files": [{"platform": "linux", "arch": "x64", "filename": "python-3.14.9-linux-x64.tar.gz"}]
+  },
+  {
+    "version": "3.14.10",
+    "stable": true,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.14.10-123458",
+    "files": [{"platform": "linux", "arch": "x64", "filename": "python-3.14.10-linux-x64.tar.gz"}]
+  },
+  {
+    "version": "3.15.0",
+    "stable": true,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.15.0-123459",
+    "files": [{"platform": "linux", "arch": "x64", "filename": "python-3.15.0-linux-x64.tar.gz"}]
+  },
+  {
+    "version": "3.16.0rc1",
+    "stable": false,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.16.0rc1-123460",
+    "files": [{"platform": "linux", "arch": "x64", "filename": "python-3.16.0rc1-linux-x64.tar.gz"}]
+  },
+  {
+    "version": "3.17.0",
+    "stable": true,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.17.0-123461",
+    "files": [{"platform": "linux", "arch": "arm64", "filename": "python-3.17.0-linux-arm64.tar.gz"}]
+  },
+  {
+    "version": "not-a-version",
+    "stable": true,
+    "release_url": "",
+    "files": [{"platform": "linux", "arch": "x64"}]
+  },
+  {
+    "version": "3.14.11",
+    "stable": true,
+    "release_url": "https://github.com/actions/python-versions/releases/tag/3.14.11-123462"
+  }
+]

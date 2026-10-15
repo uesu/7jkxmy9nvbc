@@ -1,0 +1,255 @@
+# ---------------------------------------------------------------------------
+# Trusted, review-aware merge controller for Dependabot and approved
+# runtime-proposer pull requests.
+#
+# This REPLACES .github/workflows/dependabot_auto_merge.yml (removed in the
+# same change) so exactly ONE controller can ever merge a given PR. The old
+# workflow's legitimate trigger and guards are carried over below.
+#
+# Safety properties, all deliberate:
+#   * `pull_request_target` runs THIS file from the trusted default branch.
+#     No PR-supplied code is checked out or executed — there is no checkout.
+#   * The GitHub API is the sole source of truth for the PR, its reviews, its
+#     diff and its exact head SHA.
+#   * The update policy is read from the trusted default branch's
+#     .github/maintenance.json, never from a PR's changed copy.
+#   * Reevaluation is event-driven (trusted CI completion + PR state/label/
+#     review changes), so a bounded poll is never the only chance to merge a
+#     PR whose checks finish later.
+#   * Everything is fail-closed: unknown state, API error, unexpected response,
+#     changed head or a false `merged` response blocks instead of merging.
+#
+# The decision itself is computed by .github/scripts/maintenance.py in pure
+# `--decide` mode against API-derived JSON, so the same gates can be exercised
+# from fixtures with no credentials at all.
+# ---------------------------------------------------------------------------
+name: Maintenance merge controller
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled,
+            review_requested, review_request_removed]
+  workflow_run:
+    workflows: ["CI — read-only validation + maintenance gate"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pull_number:
+        description: 'Re-evaluate this open PR number (read-only decision unless merging is enabled)'
+        required: true
+      dry_run:
+        description: 'Decide only; do not merge'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+  statuses: read
+
+concurrency:
+  group: maintenance-merge-${{ github.event.pull_request.number || github.event.inputs.pull_number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Deliberately NO checkout of the PR. The scripts below come from the
+      # default branch via the API, never from the pull-request head.
+      - name: Check out the trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7 — SHA-pinned
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+          persist-credentials: false
+
+      - name: Set up Python (exact pin from .python-version)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned
+        with:
+          python-version-file: '.python-version'
+
+      - name: Resolve the pull request to evaluate
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          number="${{ github.event.pull_request.number || github.event.inputs.pull_number || '' }}"
+          if [ -z "$number" ] && [ -n "${{ github.event.workflow_run.id }}" ]; then
+            number="$(gh api "repos/$GH_REPO/actions/runs/${{ github.event.workflow_run.id }}" \
+                        --jq '.pull_requests[0].number // empty')"
+          fi
+          if [ -z "$number" ]; then
+            echo "number=" >> "$GITHUB_OUTPUT"
+            echo "No associated pull request; nothing to evaluate."
+            exit 0
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "Evaluating PR #$number"
+
+      - name: Assemble the API-derived decision payload (no PR code executed)
+        if: steps.pr.outputs.number != ''
+        id: payload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          AUTO_MERGE_DEPENDABOT: ${{ vars.AUTO_MERGE_DEPENDABOT }}
+          AUTO_MERGE_PYTHON_BUMP: ${{ vars.AUTO_MERGE_PYTHON_BUMP }}
+        run: |
+          set -euo pipefail
+          python - "$PR_NUMBER" > decision-input.json <<'PY'
+          import json, os, subprocess, sys
+
+          number = sys.argv[1]
+          repo = os.environ["GH_REPO"]
+
+          def api(*args):
+              out = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+              if out.returncode != 0:
+                  raise SystemExit(f"gh api {' '.join(args)} failed: {out.stderr.strip()}")
+              return json.loads(out.stdout) if out.stdout.strip() else {}
+
+          pr = api(f"repos/{repo}/pulls/{number}")
+          head_sha = pr["head"]["sha"]
+
+          checks = []
+          page = 1
+          while True:
+              data = api(f"repos/{repo}/commits/{head_sha}/check-runs?per_page=100&page={page}")
+              runs = data.get("check_runs", [])
+              for run in runs:
+                  checks.append({
+                      "name": run.get("name"),
+                      "head_sha": head_sha,
+                      "status": run.get("status"),
+                      "conclusion": run.get("conclusion"),
+                      "app_slug": (run.get("app") or {}).get("slug"),
+                  })
+              if len(runs) < 100:
+                  break
+              page += 1
+
+          statuses = api(f"repos/{repo}/commits/{head_sha}/status")
+          legacy = [{"context": s.get("context"), "state": s.get("state"),
+                     "sha": (s.get("commit_id") or head_sha)}
+                    for s in statuses.get("statuses", [])]
+
+          reviews = [{"state": r.get("state"), "user": (r.get("user") or {}).get("login")}
+                     for r in api(f"repos/{repo}/pulls/{number}/reviews")]
+
+          files = api(f"repos/{repo}/pulls/{number}/files?per_page=100")
+          changed = [f.get("filename") for f in files.get("files", files if isinstance(files, list) else [])] \
+              if isinstance(files, dict) else [f.get("filename") for f in files]
+
+          labels = [l.get("name") for l in pr.get("labels", [])]
+          author = (pr.get("user") or {}).get("login")
+          head_ref = (pr.get("head") or {}).get("ref", "")
+
+          dependabot = author == "dependabot[bot]"
+          auto_var = (os.environ.get("AUTO_MERGE_DEPENDABOT") if dependabot
+                      else os.environ.get("AUTO_MERGE_PYTHON_BUMP"))
+
+          profile = json.load(open(".github/maintenance.json", encoding="utf-8"))
+          controller = profile["merge_controller"]
+          policy = {
+              "repository": repo,
+              "default_branch": pr.get("base", {}).get("ref"),
+              "trusted_updaters": controller["trusted_updaters"],
+              "allowed_merge_methods": controller["allowed_merge_methods"],
+              "auto_merge_value": "yes",
+              "required_approvals": 0,
+              "expected_required_checks": [profile["checks"]["final_gate"]],
+          }
+
+          allowed = profile["dependency_updates"]["allowed_routine_paths"]
+          unexpected = [p for p in changed if p not in allowed]
+
+          payload = {
+              "policy": policy,
+              "repository": repo,
+              "auto_merge_variable": auto_var,
+              "expected_required_checks": policy["expected_required_checks"],
+              "pr": {
+                  "number": int(number),
+                  "state": pr.get("state"),
+                  "draft": pr.get("draft"),
+                  "head_sha": head_sha,
+                  "head_ref": head_ref,
+                  "base_ref": pr.get("base", {}).get("ref"),
+                  "base_repo": (pr.get("base", {}).get("repo") or {}).get("full_name"),
+                  "author": author,
+                  "labels": labels,
+                  "hold_labels": ["hold", "do-not-merge"],
+                  "reviews": reviews,
+                  "mergeable": pr.get("mergeable"),
+                  "mergeable_state": pr.get("mergeable_state"),
+              },
+              "checks": checks,
+              "legacy_commit_statuses": legacy,
+              "diff": {"ok": not unexpected,
+                       "reason": "unexpected-paths:" + ",".join(sorted(unexpected))
+                                 if unexpected else "lock-only-change",
+                       "changed": changed},
+              "security": {"open_advisories": 0, "scan_state": "not-configured",
+                           "blocking_workflow_findings": []},
+              "update_members": None,
+          }
+          json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+          PY
+          echo "assembled $(wc -c < decision-input.json) bytes of decision input"
+
+      - name: Decide (pure, no-write; the same code path the fixtures exercise)
+        if: steps.pr.outputs.number != ''
+        id: decision
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee decision.txt
+          import json, sys
+          sys.path.insert(0, ".github/scripts")
+          import maintenance as m
+          payload = json.load(open("decision-input.json", encoding="utf-8"))
+          decision = m.decide_merge(payload)
+          print(json.dumps(decision, indent=2, sort_keys=True))
+          PY
+          action="$(python -c "import json,sys;print(json.load(open('decision.txt'))['action'])" 2>/dev/null || echo block)"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          if [ "$action" != "merge" ]; then
+            echo "::notice::Controller decision: $action — not merging."
+          fi
+
+      - name: Merge the validated head (only on an explicit merge decision)
+        if: steps.pr.outputs.number != '' && steps.decision.outputs.action == 'merge' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          head_sha="$(python -c "import json;print(json.load(open('decision-input.json'))['pr']['head_sha'])")"
+          merged=""
+          for method in squash merge; do
+            if out="$(gh api -X PUT "repos/$GH_REPO/pulls/$PR_NUMBER/merge" \
+                        -f sha="$head_sha" -f merge_method="$method" 2>&1)"; then
+              merged="$(printf '%s' "$out" | python -c "import json,sys;print(json.load(sys.stdin).get('merged'))")"
+              echo "merge_method=$method response merged=$merged"
+              break
+            elif printf '%s' "$out" | grep -q "Merge method is not allowed"; then
+              echo "::warning::$method is not enabled on this repository; trying the next reviewed method."
+              continue
+            else
+              echo "::error::merge API failed; failing closed without merging: $out"
+              exit 1
+            fi
+          done
+          if [ "$merged" != "True" ]; then
+            echo "::error::the API did not confirm a merge; failing closed."
+            exit 1
+          fi
+          echo "Merged PR #$PR_NUMBER at $head_sha."

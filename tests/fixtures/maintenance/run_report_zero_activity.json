@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "mode": "live",
+  "result": "completed",
+  "code_sha": "de0342103d2f9df5a7bb4505966620268c499a72",
+  "python_version": "3.14.8",
+  "dependency_lock_digest": "deadbeefcafe0000",
+  "runner_image": "ubuntu-24",
+  "targets": {"configured": 6, "attempted": 6, "usable": 0},
+  "requests": {"total": 18},
+  "feeds": {"parsed": 0, "http_ok": 0, "challenged": 6, "invalid": 0,
+            "timeouts": 0, "rate_limited": 0, "cancelled": 0},
+  "outcomes": {"posted": 0, "edited": 0, "skipped": 0, "held": 0, "entries": 0,
+               "reasons": {}},
+  "hosts": {"attempted": [], "selected": []},
+  "media": {"video": 0, "image": 0, "crosspost_resolved": 0,
+            "native_video_attempts": 0, "quality_upgrades": 0,
+            "fallback_reasons": []},
+  "durations": {"setup": 39.0, "monitor": 11.5, "persistence": 1.2},
+  "warnings": [], "errors": []
+}

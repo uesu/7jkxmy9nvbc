@@ -1,0 +1,79 @@
+{
+  "auto_merge_variable": "yes",
+  "checks": [
+    {
+      "app_slug": "github-actions",
+      "conclusion": "success",
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "maintenance-ci",
+      "status": "completed"
+    }
+  ],
+  "diff": {
+    "changed": [
+      "requirements.txt",
+      ".github/workflows/ci.yml"
+    ],
+    "ok": false,
+    "reason": "unexpected-paths:.github/workflows/ci.yml"
+  },
+  "expected_required_checks": [
+    "maintenance-ci"
+  ],
+  "legacy_commit_statuses": [],
+  "policy": {
+    "allowed_merge_methods": [
+      "squash",
+      "merge"
+    ],
+    "auto_merge_value": "yes",
+    "default_branch": "main",
+    "expected_required_checks": [
+      "maintenance-ci"
+    ],
+    "repository": "uesu/7jkxmy9nvbc",
+    "required_approvals": 0,
+    "trusted_updaters": [
+      {
+        "branch_prefix": "dependabot/",
+        "kind": "dependencies",
+        "login": "dependabot[bot]"
+      },
+      {
+        "branch_prefix": "chore/python-",
+        "kind": "python",
+        "login": "arena-bump-bot"
+      }
+    ]
+  },
+  "pr": {
+    "author": "dependabot[bot]",
+    "base_ref": "main",
+    "base_repo": "uesu/7jkxmy9nvbc",
+    "draft": false,
+    "head_ref": "dependabot/pip/python-deps-1a2b3c",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hold_labels": [
+      "hold",
+      "do-not-merge"
+    ],
+    "labels": [],
+    "mergeable": true,
+    "mergeable_state": "clean",
+    "number": 7,
+    "reviews": [],
+    "state": "open"
+  },
+  "repository": "uesu/7jkxmy9nvbc",
+  "security": {
+    "blocking_workflow_findings": [],
+    "open_advisories": 0,
+    "scan_state": "not-configured"
+  },
+  "update_members": [
+    {
+      "reason": "in-range-routine-update",
+      "risk": "routine"
+    }
+  ]
+}

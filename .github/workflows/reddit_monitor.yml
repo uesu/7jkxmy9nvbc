@@ -67,18 +67,24 @@ jobs:
           git fetch origin "${CACHE_BRANCH:-main}"
           git reset --hard FETCH_HEAD
           echo "Now at $(git log -1 --format=%H) (live ${CACHE_BRANCH:-main} tip)."
+          # Capture the ACTUAL checked-out code SHA before anything executes.
+          # GITHUB_SHA is pinned at dispatch time and a queued run starts on a
+          # stale tip, so it is not the code this run really used.
+          echo "RUN_CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7 — SHA-pinned (round 57)
         with:
-          # Exact stable CPython pin; update deliberately after CI validates it.
-          python-version: '3.14.8'
+          # The exact stable CPython pin lives in .python-version — the single
+          # runtime source of truth. A patch bump rewrites that one file; this
+          # workflow is not rewritten for it.
+          python-version-file: '.python-version'
           cache: 'pip'
+          cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
+      - name: Install the frozen runtime graph (hash-verified)
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
 
       - name: Run Reddit Feed Monitor
         env:
@@ -170,6 +176,11 @@ jobs:
           # and the feed-token .json probe re-enables itself (auto mode).
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          # Structured run report: an internal path under RUNNER_TEMP.
+          # The engine writes bounded counters there; the renderer below
+          # reads it AFTER persistence and makes no requests of its own.
+          RUN_REPORT_PATH: ${{ runner.temp }}/run-report.json
+          RUN_LOCK_PATH: requirements.txt
         # ───────────────────────────────────────────────────────────────────
         # TESTING AREA (how updates ship):
         # • A new/changed script lives in "testing area/" FIRST (e.g.
@@ -273,36 +284,43 @@ jobs:
           fi
           echo "CACHE_RESULT=success" >> "$GITHUB_ENV"
 
-      # Reporting only: reads the local monitor log and performs no network or cache work.
+      # Distinguish local save, commit and remote push. A local JSON save is
+      # never reported as a successful push, and a missing record is reported
+      # as unavailable rather than as fake zero activity.
+      - name: Record the state-persistence outcome
+        if: always()
+        env:
+          CACHE_RESULT: ${{ env.CACHE_RESULT }}
+        run: |
+          python - <<'PY'
+          import json, os
+          path = os.environ.get("RUN_PERSISTENCE_PATH") or os.path.join(
+              os.environ.get("RUNNER_TEMP", "."), "persistence.json")
+          result = (os.environ.get("CACHE_RESULT") or "").strip()
+          if result == "success":
+              states = {"local_save": "success", "commit": "unchanged-or-committed",
+                        "push": os.environ.get("CACHE_PUSHED", "pushed")}
+          elif result == "failed":
+              states = {"local_save": "success", "commit": "failed", "push": "failed"}
+          else:
+              states = {"local_save": "unavailable", "commit": "not-run",
+                        "push": "not-run"}
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(states, handle, indent=2, sort_keys=True)
+          print("persistence record:", states)
+          PY
+
+      # Reporting only. Reads the structured run report and the persistence
+      # record; makes NO additional requests, mutates no state and posts
+      # nothing. Runs after persistence, in always(), so the final state-push
+      # status is reported even when setup or the application failed.
       - name: Write monitor run summary
         if: always()
+        env:
+          RUN_WORKFLOW_NAME: Reddit Feed Monitor
+          RUN_JOB_STATUS: ${{ job.status }}
         run: |
-          [ -f monitor.log ] || : > monitor.log
-          count_matches() { local pattern="$1"; grep -Ec "$pattern" monitor.log 2>/dev/null || true; }
-          extract_number() { local value; value=$(grep -Eo "$1" monitor.log 2>/dev/null | grep -Eo '[0-9]+' | tail -1 || true); printf '%s\n' "${value:-0}"; }
-          runtime=$(( ${MONITOR_END_EPOCH:-$(date +%s)} - ${MONITOR_START_EPOCH:-$(date +%s)} ))
-          ok=$(count_matches 'proxy warm-up.*OK')
-          failed=$(count_matches 'proxy warm-up.*(DOWN|FAILED|unavailable|error)')
-          new_candidates=$(extract_number 'Found [0-9]+ new Reddit posts')
-          {
-            echo "## Reddit Feed Monitor — run summary"
-            echo
-            if [ "${{ job.status }}" = "success" ]; then echo "**Result:** success"; else echo "**Result:** failure"; fi
-            echo "**Runtime:** ${runtime}s"
-            echo
-            echo "### Feed"
-            echo "- entries read: $(extract_number 'Combined feed OK: [0-9]+ entries')"
-            echo "- new candidates: ${new_candidates}"
-            echo "- posts delivered: $(count_matches 'Reddit V3 Posted:')"
-            echo "- listing/retry-related log lines: $(count_matches 'skipped.*next tick|retried next tick')"
-            echo
-            echo "### Providers and videos"
-            echo "- proxy warmups: ${ok} OK, ${failed} failed"
-            echo "- accepted 1080p upgrades: $(count_matches 'EmbedEZ 1080p candidate accepted')"
-            echo "- quality fallback notices: $(count_matches 'retaining validated base')"
-            echo "- final video provider labels: $(grep -Eo 'card media via [^ ]+' monitor.log 2>/dev/null | sort -u | tr '\n' ' ' || true)"
-            echo
-            echo "### State"
-            echo "- cache commit/push: ${CACHE_RESULT:-failed}"
-            echo "- summary source: local monitor.log only; no additional requests"
-          } >> "$GITHUB_STEP_SUMMARY"
+          python .github/scripts/render_run_summary.py \
+            --report "${RUN_REPORT_PATH:-$RUNNER_TEMP/run-report.json}" \
+            --persistence "${RUN_PERSISTENCE_PATH:-$RUNNER_TEMP/persistence.json}" \
+            --output "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,25 @@
+# Development / CI-only tools — human-maintained INPUT only.
+#
+# requirements-dev.txt is GENERATED from this file, constrained against the
+# runtime lock so a test-only tool can never silently replace or downgrade a
+# runtime dependency:
+#
+#   python -m piptools compile --generate-hashes --allow-unsafe \
+#     --resolver=backtracking --strip-extras \
+#     --constraint=requirements.txt \
+#     --output-file=requirements-dev.txt requirements-dev.in
+#
+# Nothing in here is needed by the monitors at runtime.
+
+-c requirements.txt
+
+# Pinned lock compiler toolchain: regenerating requirements.txt with a
+# different pip/pip-tools pair is not a reproducible lock update.
+pip==26.1.1
+pip-tools==7.5.3
+
+# Workflow YAML parsing for the CI configuration checks.
+pyyaml==6.0.3
+
+# Lint/format gate for the maintenance helpers and tests.
+ruff==0.17.0

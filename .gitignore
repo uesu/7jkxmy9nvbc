@@ -20,6 +20,19 @@ __pycache__/
 # Local logs
 *.log
 
+# Generated maintenance/validation scratch (never committed; the monitors write
+# their run reports under RUNNER_TEMP, and these are the local equivalents plus
+# the isolated compiler/tool virtualenvs the lock jobs build).
+/.compiler/
+/.tools/
+run-report*.json
+persistence*.json
+compiler-requirements*.txt
+
+# Ruff cache for the pinned lint gate (the tool version itself is pinned in
+# requirements-dev.txt; only its cache is generated).
+.ruff_cache/
+
 # Virtual environments
 venv/
 .venv/

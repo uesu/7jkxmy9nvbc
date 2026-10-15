@@ -1,0 +1,55 @@
+{
+  "_note": "SYNTHETIC reconstruction of the identity and metadata shapes described for incident AnantaLeaks_1x6h1mf (Reddit Feed Monitor #7371). This is NOT a captured production RSS, archive or proxy response body.",
+  "child": {
+    "subreddit": "AnantaLeaks",
+    "post_id": "1x6h1mf",
+    "path": "/r/AnantaLeaks/comments/1x6h1mf/phone_stealing_from_aphotide/",
+    "dedup_key": "AnantaLeaks_1x6h1mf",
+    "read_post_url": "https://www.reddit.com/r/AnantaLeaks/comments/1x6h1mf/phone_stealing_from_aphotide/",
+    "title": "Phone stealing from Aphotide",
+    "vred_id": null,
+    "crosspost_post_link": null
+  },
+  "original": {
+    "author": "aphotide",
+    "post_id": "1x6h1a5",
+    "path": "/user/aphotide/comments/1x6h1a5/phone_stealing_from_aphotide/",
+    "aliases": [
+      "/user/aphotide/comments/1x6h1a5/phone_stealing_from_aphotide/",
+      "/u/aphotide/comments/1x6h1a5/phone_stealing_from_aphotide/",
+      "/r/u_aphotide/comments/1x6h1a5/phone_stealing_from_aphotide/"
+    ],
+    "vred_id": "1y2gic17nlvh1",
+    "video_urls": {
+      "cmaf_1080": "https://v.redd.it/1y2gic17nlvh1/CMAF_1080.mp4",
+      "cmaf_720": "https://v.redd.it/1y2gic17nlvh1/CMAF_720.mp4",
+      "cmaf_audio_128": "https://v.redd.it/1y2gic17nlvh1/CMAF_AUDIO_128.mp4"
+    }
+  },
+  "proxy_user_route_poster_only": {
+    "service": "vxreddit",
+    "media": [
+      {"kind": "image", "url": "https://external-preview.redd.it/poster-tile.png"}
+    ],
+    "stats": null,
+    "body": null
+  },
+  "proxy_alias_route_video": {
+    "service": "vxreddit",
+    "media": [
+      {"kind": "video",
+       "url": "https://proxy.vxreddit.example/render/video.mp4?videoUrl=https%3A%2F%2Fv.redd.it%2F1y2gic17nlvh1%2FCMAF_720.mp4&audioUrl=https%3A%2F%2Fv.redd.it%2F1y2gic17nlvh1%2FCMAF_AUDIO_128.mp4"}
+    ],
+    "stats": {"ups": 120, "comments": 9},
+    "body": "Phone stealing from Aphotide"
+  },
+  "source_embed_video_plus_audio_cover": {
+    "service": "embedez",
+    "media": [
+      {"kind": "video",
+       "url": "https://proxy.embedez.com/render/video.mp4?videoUrl=https%3A%2F%2Fv.redd.it%2F1y2gic17nlvh1%2FCMAF_720.mp4&audioUrl=https%3A%2F%2Fv.redd.it%2F1y2gic17nlvh1%2FCMAF_AUDIO_128.mp4&headers=%7B%7D"},
+      {"kind": "image", "audio_cover_only": true,
+       "url": "https://proxy.embedez.com/render/audio?audioUrl=https%3A%2F%2Fv.redd.it%2F1y2gic17nlvh1%2FCMAF_AUDIO_128.mp4&cover=https%3A%2F%2Fexternal-preview.redd.it%2Fcover-1920x1080.jpg"}
+    ]
+  }
+}
