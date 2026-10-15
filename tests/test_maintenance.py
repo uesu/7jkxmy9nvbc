@@ -57,6 +57,11 @@ def check(name: str, condition: bool) -> None:
     else:
         failures.append(name)
         print(f"FAIL {name}")
+        # Hosted job logs are not always retrievable, and a bare non-zero exit
+        # names no cause. Emitting an annotation makes the specific failing
+        # assertion readable through the check-runs API.
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::error title={os.path.basename(__file__)}::{name}")
 
 
 def fixture(name: str):
