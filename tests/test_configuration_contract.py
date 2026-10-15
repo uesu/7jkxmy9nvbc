@@ -81,6 +81,16 @@ check("requirements.txt is generated, not a second hand-edited list",
 check("the runtime lock is fully pinned with hashes",
       "--hash=sha256:" in REQ_LOCK
       and not re.search(r"^(?!\s*#)[a-z0-9_.\-]+\s*(>=|<=|~=|>|<)", REQ_LOCK, re.MULTILINE))
+# Presence of the marker is not integrity: a padded, truncated or mistyped
+# digest still contains "--hash=sha256:", and pip only rejects it at install
+# time — long after a human merged. sha256 is exactly 64 hex characters, so a
+# malformed one is provably wrong offline. ci.py enforces this too; asserting
+# it here means the hole cannot silently reopen.
+for _label, _lock in (("runtime", REQ_LOCK), ("dev", DEV_LOCK)):
+    _digests = re.findall(r"--hash=sha256:([^\s\\]+)", _lock)
+    check(f"every {_label} lock digest is a well-formed 64-char sha256",
+          len(_digests) > 0
+          and all(re.fullmatch(r"[0-9a-fA-F]{64}", d) for d in _digests))
 check("the baseline direct versions are the resolved ones",
       all(f"{pkg}==" in REQ_LOCK
           for pkg in ("aiohttp", "feedparser", "python-dotenv")))

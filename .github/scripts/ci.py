@@ -45,6 +45,7 @@ PROFILE_PATH = os.path.join(REPO_ROOT, ".github", "maintenance.json")
 
 # Pinned wrapper Action SHAs are checked, not the version comments.
 _ACTION_SHA_RE = re.compile(r"uses:\s*[^@\s]+@([0-9a-f]{40})\s*(?:#.*)?$")
+_HEX64_RE = re.compile(r"[0-9a-fA-F]{64}")
 _ACTION_FLOATING_RE = re.compile(r"uses:\s*[^@\s]+@(?!v?\d*[0-9a-f]{40})")
 _WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -189,6 +190,18 @@ def check_lockfiles(profile: dict) -> tuple[bool, str]:
             problems.append(f"{runtime[key]} header is not the canonical compiler header")
         if "--hash=sha256:" not in text:
             problems.append(f"{runtime[key]} has no hashes")
+        # Presence is not integrity: a truncated, padded or mistyped digest
+        # still contains the marker above, and pip would only reject it at
+        # install time — long after a human merged. sha256 is exactly 64 hex
+        # characters, so anything else is provably wrong without network.
+        # (A well-formed but semantically wrong hash cannot be caught offline;
+        # only a hashed install can prove it.)
+        digests = re.findall(r"--hash=sha256:([^\s\\]+)", text)
+        malformed = [d for d in digests if not _HEX64_RE.fullmatch(d)]
+        if malformed:
+            problems.append(
+                f"{runtime[key]} has {len(malformed)} malformed sha256 digest(s); "
+                f"first: {malformed[0][:24]}... (expected 64 hex chars)")
         loose = re.findall(
             r"^(?!\s*#)([A-Za-z0-9_.\-\[\]]+)\s*(==|>=|<=|~=|>|<)", text, re.MULTILINE)
         unpinned = [name for name, op in loose if op != "=="]
