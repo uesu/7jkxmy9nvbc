@@ -2083,6 +2083,242 @@ class LiveCheckRunLinkTests(unittest.TestCase):
         self.assertEqual(decision.action, "fail")
         self.assertEqual(decision.reason, "producer-run-record-mismatch:application")
 
+class LiveCollectorMissingEvidenceTests(unittest.TestCase):
+    """Drive the real collector into the real decision, with evidence removed.
+
+    Every gate below is reached through build_live_snapshot, so a collector that
+    stopped populating a field the verifier needs cannot hide behind a helper
+    fixture. Removing a source of evidence must never merge.
+    """
+
+    EVENT = {
+        "repository": {"full_name": "acme/app", "default_branch": "main"},
+        "pull_request": {"number": 12, "head": {"sha": SHA}},
+    }
+    PROFILE = {
+        "mandatory_check_names": ["application"],
+        "check_producers": {
+            "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+        },
+        "dependabot_allowed_files": ["requirements.txt", "requirements.in"],
+        "security_evidence": {"mode": "disabled", "required": []},
+        "updater_identities": {
+            "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
+        },
+    }
+    FILES = [{"filename": "requirements.txt", "patch": "-aiohttp==3.14.4\n+aiohttp==3.14.5\n"}]
+    CHECK = {
+        "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+        "conclusion": "success", "app": {"slug": "github-actions"},
+        "details_url": "https://github.com/acme/app/actions/runs/77/job/88",
+    }
+    JOB = {
+        "id": 88, "run_id": 77, "name": "application", "head_sha": SHA, "run_attempt": 1,
+        "status": "completed", "conclusion": "success",
+        "check_run_url": "https://api.github.com/repos/acme/app/check-runs/1",
+    }
+    RUN = {
+        "id": 77, "path": ".github/workflows/ci.yml", "head_sha": SHA, "run_attempt": 1,
+        "status": "completed", "conclusion": "success",
+    }
+
+    def _responder(self, *, check=None, drop_check=False, job=None, run=None,
+                   job_status=200, run_status=200, checks_status=200,
+                   reviews_status=200, statuses_status=200, files_status=200,
+                   pr_status=200):
+        job_body = self.JOB if job is None else job
+        run_body = self.RUN if run is None else run
+        checks = [] if drop_check else [self.CHECK if check is None else check]
+
+        def responder(url, *args, **kwargs):
+            if "/actions/jobs/88" in url:
+                return job_status, job_body
+            if "/actions/runs/77" in url:
+                return run_status, run_body
+            if "/pulls/12/files" in url:
+                return files_status, []
+            if "/pulls/12/reviews" in url:
+                return reviews_status, []
+            if "/check-runs" in url:
+                return checks_status, {"check_runs": checks, "total_count": len(checks)}
+            if url.endswith("/status"):
+                return statuses_status, {"state": "success", "statuses": []}
+            if url.endswith("/pulls/12"):
+                return pr_status, _pr(head_repo="acme/app", base_repo="acme/app", sha=SHA)
+            return 404, {}
+
+        return responder
+
+    def _decide(self, responder, profile=None):
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            snapshot = maintenance.build_live_snapshot(
+                self.EVENT, "token", self.PROFILE if profile is None else profile
+            )
+        finally:
+            maintenance._github_json = original
+        if not isinstance(snapshot, dict):
+            return snapshot
+        # Only the fields the mocked API cannot express are supplied; the evidence
+        # under test is whatever the live collector actually returned.
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(head_repo="acme/app", base_repo="acme/app", sha=SHA)
+        snapshot["files"] = self.FILES
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"}
+        snapshot["variables"] = {"AUTO_MERGE_DEPENDABOT": "yes"}
+        return maintenance.decide_merge(snapshot)
+
+    def _drop(self, key):
+        return {k: v for k, v in self.CHECK.items() if k != key}
+
+    def test_complete_evidence_reaches_merge(self):
+        decision = self._decide(self._responder())
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+    def test_a_denied_jobs_api_blocks_the_decision(self):
+        decision = self._decide(self._responder(job_status=403))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-evidence-unavailable:application:job-api:403")
+
+    def test_a_denied_runs_api_blocks_the_decision(self):
+        decision = self._decide(self._responder(run_status=403))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-evidence-unavailable:application:run-api:403")
+
+    def test_an_absent_mandatory_check_blocks_the_decision(self):
+        decision = self._decide(self._responder(drop_check=True))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "missing-mandatory-check")
+
+    def test_a_check_without_an_app_blocks_the_decision(self):
+        decision = self._decide(self._responder(check=self._drop("app")))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "missing-check-app:application")
+
+    def test_a_check_without_a_head_sha_blocks_the_decision(self):
+        decision = self._decide(self._responder(check=self._drop("head_sha")))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "missing-check-head-sha:application")
+
+    def test_a_check_without_a_details_url_blocks_the_decision(self):
+        decision = self._decide(self._responder(check=self._drop("details_url")))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(
+            decision.reason,
+            "producer-evidence-unavailable:application:unresolvable-details-url",
+        )
+
+    def test_a_job_without_a_check_run_url_blocks_the_decision(self):
+        decision = self._decide(self._responder(job=self._drop_job("check_run_url")))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-missing-check-run-url:application")
+
+    def test_a_denied_check_runs_api_fails_closed(self):
+        self.assertEqual(self._decide(self._responder(checks_status=403)).reason, "checks-api:403")
+
+    def test_a_denied_reviews_api_fails_closed(self):
+        self.assertEqual(self._decide(self._responder(reviews_status=403)).reason, "reviews-api:403")
+
+    def test_a_denied_statuses_api_fails_closed(self):
+        self.assertEqual(self._decide(self._responder(statuses_status=403)).reason, "statuses-api:403")
+
+    def test_a_denied_files_api_fails_closed(self):
+        self.assertEqual(self._decide(self._responder(files_status=403)).reason, "files-api:403")
+
+    def test_a_denied_pull_request_api_fails_closed(self):
+        self.assertEqual(self._decide(self._responder(pr_status=403)).reason, "pr-api:403")
+
+    def _drop_job(self, key):
+        return {k: v for k, v in self.JOB.items() if k != key}
+
+
+class LiveCollectorSecurityEvidenceTests(unittest.TestCase):
+    """Same live path, with the scan evidence varied instead of the checks."""
+
+    EVENT = LiveCollectorMissingEvidenceTests.EVENT
+    BASE = LiveCollectorMissingEvidenceTests.PROFILE
+    REQUIRED = ["code-scanning", "secret-scanning"]
+    CLEAN_CODE = {"state": "fixed", "most_recent_instance": {"state": "fixed"}}
+    OPEN_CODE = {"state": "open", "most_recent_instance": {"state": "open"}}
+    CLEAN_SECRET = {"state": "resolved"}
+    OPEN_SECRET = {"state": "open"}
+
+    def _profile(self, security):
+        return dict(self.BASE, security_evidence=security)
+
+    def _decide(self, security, *, api=200, analyses=None, code=None, secret=None):
+        parent = LiveCollectorMissingEvidenceTests()
+        base = parent._responder()
+
+        def responder(url, *args, **kwargs):
+            if "/code-scanning/analyses" in url:
+                return api, [{"commit_sha": SHA}] if analyses is None else analyses
+            if "/code-scanning/alerts" in url:
+                return api, [self.CLEAN_CODE] if code is None else code
+            if "/secret-scanning/alerts" in url:
+                return api, [self.CLEAN_SECRET] if secret is None else secret
+            return base(url)
+
+        return parent._decide(responder, profile=self._profile(security))
+
+    def test_disabled_mode_merges_even_when_scans_are_unreadable(self):
+        decision = self._decide({"mode": "disabled", "required": []}, api=403)
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+    def test_required_mode_defers_when_scans_are_unreadable(self):
+        decision = self._decide({"mode": "required", "required": self.REQUIRED}, api=403)
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.reason, "security-evidence-unavailable:code-scanning:unavailable")
+
+    def test_required_mode_merges_on_clean_head_scoped_evidence(self):
+        decision = self._decide({"mode": "required", "required": self.REQUIRED})
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+    def test_an_open_code_scanning_alert_blocks(self):
+        decision = self._decide(
+            {"mode": "required", "required": self.REQUIRED}, code=[self.OPEN_CODE]
+        )
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "unresolved-code-scanning-alerts:1")
+
+    def test_an_open_secret_scanning_alert_blocks(self):
+        decision = self._decide(
+            {"mode": "required", "required": self.REQUIRED}, secret=[self.OPEN_SECRET]
+        )
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "unresolved-secret-scanning-alerts:1")
+
+    def test_an_analysis_that_is_not_on_head_defers(self):
+        decision = self._decide(
+            {"mode": "required", "required": self.REQUIRED}, analyses=[{"commit_sha": SHA2}]
+        )
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.reason, "security-evidence-unavailable:code-scanning:no-analysis-for-head")
+
+    def test_no_analyses_at_all_defers(self):
+        decision = self._decide({"mode": "required", "required": self.REQUIRED}, analyses=[])
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.reason, "security-evidence-unavailable:code-scanning:no-analysis-for-head")
+
+    def test_an_unrecognised_alert_state_defers(self):
+        decision = self._decide(
+            {"mode": "required", "required": self.REQUIRED}, code=[{"state": "open"}]
+        )
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.reason, "security-evidence-unavailable:code-scanning:malformed")
+
+    def test_an_unrecognised_mode_fails_closed(self):
+        decision = self._decide({"mode": "whatever", "required": []})
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "security-evidence-unconfigured")
+
+    def test_required_mode_with_no_required_kinds_fails_closed(self):
+        decision = self._decide({"mode": "required", "required": []})
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "security-evidence-unconfigured")
+
 
 if __name__ == "__main__":
     unittest.main()
