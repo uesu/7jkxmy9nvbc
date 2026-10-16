@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1015,6 +1018,169 @@ class LiveAdapterEvidenceTests(unittest.TestCase):
         self.assertNotIsInstance(result, dict)
         self.assertEqual(result.action, "fail")
         self.assertIn("files-api", result.reason)
+
+
+class ReleaseAgeAuthorityTests(unittest.TestCase):
+    """Next-minor soak must measure the upstream release, not an archive rebuild.
+
+    These drive the real `main()` entry point with only the network stubbed, so a
+    caller that forgot to fetch dates cannot pass.
+    """
+
+    NOW = datetime(2026, 10, 16, tzinfo=timezone.utc)
+    OLD = "2026-01-01"
+    YOUNG = "2026-10-11"
+
+    def _manifest(self, *versions):
+        return [
+            {"version": v, "stable": True, "release_url": f"https://example/{v}",
+             "files": [{"platform": "linux", "arch": "x64", "filename": "py.tgz"}]}
+            for v in versions
+        ]
+
+    def _authority(self, *pairs):
+        return {"results": [{"name": f"Python {v}", "release_date": d} for v, d in pairs],
+                "next": None}
+
+    def _run_main(self, manifest, authority=None, error=None):
+        """Invoke the real CLI, stubbing only urllib."""
+        captured = {}
+
+        class _Resp:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def read(self):
+                return json.dumps(self._payload).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(url, timeout=None):
+            captured["url"] = url
+            if error is not None:
+                raise error
+            return _Resp(authority)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".python-version").write_text("3.14.0\n", encoding="utf-8")
+            path = root / "manifest.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            cache = root / "dates.json"
+            buffer = io.StringIO()
+            saved = python_version_bump.urllib.request.urlopen
+            python_version_bump.urllib.request.urlopen = fake_urlopen
+            try:
+                with contextlib.redirect_stdout(buffer):
+                    code = python_version_bump.main([
+                        "--manifest", str(path),
+                        "--release-date-cache", str(cache),
+                        "--root", str(root),
+                    ])
+            finally:
+                python_version_bump.urllib.request.urlopen = saved
+        self.assertEqual(code, 0)
+        return json.loads(buffer.getvalue()), captured
+
+    def test_aged_next_minor_is_proposed_for_review(self):
+        result, seen = self._run_main(
+            self._manifest("3.14.0", "3.15.0"),
+            authority=self._authority(("3.14.0", self.OLD), ("3.15.0", self.OLD)),
+        )
+        self.assertEqual(result["status"], "review-required")
+        self.assertEqual(result["reason"], "next-minor")
+        self.assertEqual(result["candidate"], "3.15.0")
+        self.assertIn("python.org/api/v2/downloads/release", seen["url"])
+
+    def test_young_next_minor_defers_on_soak(self):
+        result, _ = self._run_main(
+            self._manifest("3.14.0", "3.15.0"),
+            authority=self._authority(("3.14.0", self.OLD), ("3.15.0", self.YOUNG)),
+        )
+        self.assertEqual(result["status"], "deferred")
+        self.assertTrue(result["reason"].startswith("soak"))
+        self.assertFalse(result.get("auto_eligible", False))
+
+    def test_version_absent_from_the_authority_defers(self):
+        # Regression: the manifest was passed straight to selection, so a
+        # next-minor with no date anywhere was the only thing that could defer.
+        # The lookup must now supply it, and its absence must stay a defer.
+        result, _ = self._run_main(
+            self._manifest("3.14.0", "3.15.0"),
+            authority=self._authority(("3.14.0", self.OLD)),
+        )
+        self.assertEqual(result["status"], "deferred")
+        self.assertEqual(result["reason"], "release-date-unavailable")
+        self.assertIn("3.15.0", result["release_dates"]["unknown"])
+
+    def test_malformed_upstream_date_is_discarded_not_trusted(self):
+        result, _ = self._run_main(
+            self._manifest("3.14.0", "3.15.0"),
+            authority=self._authority(("3.14.0", self.OLD), ("3.15.0", "not-a-date")),
+        )
+        self.assertEqual(result["reason"], "release-date-unavailable")
+
+    def test_a_failed_lookup_defers_rather_than_looking_up_to_date(self):
+        result, _ = self._run_main(
+            self._manifest("3.14.0", "3.15.0"),
+            error=OSError("connection refused"),
+        )
+        self.assertEqual(result["status"], "deferred")
+        self.assertEqual(result["reason"], "release-date-unavailable")
+        self.assertEqual(result["release_dates"]["state"], "unavailable")
+        self.assertNotEqual(result["status"], "up-to-date")
+
+    def test_a_rebuilt_archive_cannot_redefine_release_age(self):
+        # The setup-python manifest carries no upstream dates at all; if the
+        # proposer ever fell back to archive metadata, a repackaged old release
+        # would look young. Only the authority fills the field.
+        result, _ = self._run_main(
+            self._manifest("3.14.0", "3.15.0"),
+            authority=self._authority(("3.14.0", self.OLD), ("3.15.0", self.YOUNG)),
+        )
+        self.assertEqual(result["release_dates"]["authority"], "python.org downloads API v2")
+        self.assertEqual(result["release_dates"]["resolved"], ["3.14.0", "3.15.0"])
+
+    def test_dates_are_cached_within_the_ttl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "dates.json"
+            saved = python_version_bump.urllib.request.urlopen
+            calls = []
+
+            class _Resp:
+                def read(self):
+                    return json.dumps(self_payload).encode("utf-8")
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            self_payload = self._authority(("3.15.0", self.OLD))
+
+            def counting(url, timeout=None):
+                calls.append(url)
+                return _Resp()
+
+            python_version_bump.urllib.request.urlopen = counting
+            try:
+                first, state1, _ = python_version_bump.fetch_release_dates(
+                    cache_path=cache, now=self.NOW
+                )
+                second, state2, _ = python_version_bump.fetch_release_dates(
+                    cache_path=cache, now=self.NOW
+                )
+            finally:
+                python_version_bump.urllib.request.urlopen = saved
+        self.assertEqual(state1, "ok")
+        self.assertEqual(state2, "cache")
+        self.assertEqual(first, second)
+        self.assertEqual(len(calls), 1, "the cached lookup must not hit the network")
 
 
 if __name__ == "__main__":
