@@ -124,14 +124,19 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Require every mandatory dependency to have succeeded
+        env:
+          APPLICATION_RESULT: ${{ needs.application.result }}
+          MAINTENANCE_RESULT: ${{ needs.maintenance.result }}
+          LOCK_RESULT: ${{ needs.lock-consistency.result }}
+          WORKFLOW_RESULT: ${{ needs.workflow-security.result }}
         run: |
           python - <<'PY'
-          import sys
+          import os, sys
           results = {
-              "application": "${{ needs.application.result }}",
-              "maintenance": "${{ needs.maintenance.result }}",
-              "lock-consistency": "${{ needs.lock-consistency.result }}",
-              "workflow-security": "${{ needs.workflow-security.result }}",
+              "application": os.environ.get("APPLICATION_RESULT", ""),
+              "maintenance": os.environ.get("MAINTENANCE_RESULT", ""),
+              "lock-consistency": os.environ.get("LOCK_RESULT", ""),
+              "workflow-security": os.environ.get("WORKFLOW_RESULT", ""),
           }
           failed = [name for name, value in results.items() if value != "success"]
           if failed:

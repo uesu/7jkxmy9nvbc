@@ -281,7 +281,7 @@ check("proxy: og:image collects all in order",
       str(meta.get("og:image")))
 check("proxy: og values unescaped", meta.get("og:title") == "Heist mode & more", str(meta.get("og:title")))
 check("proxy: og:video captured",
-      str(meta.get("og:video:secure_url", "")).startswith("https://vxreddit.com/redditvideo.mp4"),
+      (meta.get("og:video:secure_url") or [""])[0].startswith("https://vxreddit.com/redditvideo.mp4"),
       str(meta.get("og:video:secure_url")))
 
 # r51: vxReddit sometimes returns an HTTP-200 shell for a crosspost's own

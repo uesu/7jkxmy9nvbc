@@ -215,6 +215,51 @@ class VideoEligibilityTests(unittest.TestCase):
         })
         self.assertTrue(all(item["kind"] != "video" for item in media))
 
+    def test_proxy_og_keeps_first_motion_and_skips_later_cover(self):
+        # Motion-first ordering, driven through the real _og_meta parser.
+        page = (
+            '<meta property="og:video" content="https://v.redd.it/motion456/DASH_720.mp4"/>'
+            '<meta property="og:video" content="https://proxy.embedez.com/render/audio?cover=x"/>'
+        )
+        media = proxy._media_from_og(proxy._og_meta(page))
+        videos = [item for item in media if item.get("kind") == "video"]
+        self.assertEqual(len(videos), 1)
+        self.assertIn("motion456", videos[0]["url"])
+        self.assertFalse(any(proxy.is_audio_cover_url(item.get("url")) for item in media))
+
+    def test_proxy_og_prefers_later_motion_video(self):
+        # Regression: _og_meta kept only the first value for every key except
+        # og:image, so when an audio-cover render preceded the motion video the
+        # cover was taken, rejected, and no video was found at all - the card
+        # fell back to a still. Collecting every occurrence in document order
+        # lets the consumer skip the cover and reach the motion candidate.
+        page = (
+            '<meta property="og:video" content="https://proxy.embedez.com/render/audio?cover=x"/>'
+            '<meta property="og:video" content="https://v.redd.it/motion123/DASH_1080.mp4"/>'
+            '<meta property="og:image" content="https://i.redd.it/still.jpg"/>'
+        )
+        meta = proxy._og_meta(page)
+        self.assertEqual(len(meta["og:video"]), 2, "both video tags must be collected")
+        media = proxy._media_from_og(meta)
+        videos = [item for item in media if item.get("kind") == "video"]
+        self.assertEqual(len(videos), 1)
+        self.assertIn("motion123", videos[0]["url"])
+        self.assertFalse(any(proxy.is_audio_cover_url(item.get("url")) for item in media))
+
+    def test_og_meta_collects_every_video_key_in_order(self):
+        page = (
+            '<meta property="og:video:secure_url" content="https://v.redd.it/a/DASH_720.mp4"/>'
+            '<meta property="og:video" content="https://v.redd.it/b/DASH_1080.mp4"/>'
+            '<meta property="twitter:player:stream" content="https://v.redd.it/c.mp4"/>'
+        )
+        meta = proxy._og_meta(page)
+        for key, expected in (
+            ("og:video:secure_url", ["https://v.redd.it/a/DASH_720.mp4"]),
+            ("og:video", ["https://v.redd.it/b/DASH_1080.mp4"]),
+            ("twitter:player:stream", ["https://v.redd.it/c.mp4"]),
+        ):
+            self.assertEqual(meta.get(key), expected, key)
+
     def test_encoded_video_id_and_preview_negative(self):
         encoded = "https://x.test/?videoUrl=https%3A%2F%2Fv.redd.it%2Fvideoid09%2FDASH_1080.mp4"
         self.assertEqual(v3.extract_vreddit_id_from_media_url(encoded), "videoid09")

@@ -402,10 +402,19 @@ def status_id_decode(encoded: str) -> str:
 # ---------------------------------------------------------------------------
 # ■ Parsing helpers (pure — unit-testable offline)
 # ---------------------------------------------------------------------------
+_MULTI_OG_KEYS = frozenset({
+    "og:image",
+    "og:video",
+    "og:video:url",
+    "og:video:secure_url",
+    "twitter:player:stream",
+})
+
+
 def _og_meta(page_html: str) -> dict:
-    """og:/twitter: meta tags -> dict. og:image collects ALL occurrences in
-    order (galleries emit one tag per photo); every other key keeps the
-    first value. HTML entities are unescaped."""
+    """og:/twitter: meta tags -> dict. Image and video keys collect ALL
+    occurrences in document order (audio-cover stills can precede motion);
+    every other key keeps the first value. HTML entities are unescaped."""
     meta = {}
     for m in re.finditer(r"<meta[^>]+>", page_html, re.I):
         tag = m.group(0)
@@ -420,8 +429,8 @@ def _og_meta(page_html: str) -> dict:
             if (k2, v2) == (key, val):
                 break
             key, val = k2, v2
-        if key == "og:image":
-            meta.setdefault("og:image", []).append(val)
+        if key in _MULTI_OG_KEYS:
+            meta.setdefault(key, []).append(val)
         else:
             meta.setdefault(key, val)
     return meta
@@ -1022,17 +1031,37 @@ def filter_proxy_media(media: list | None) -> list:
     return out
 
 
+def _og_values(meta: dict, *keys: str) -> list:
+    """Preserve document order when keys are lists; accept a bare string too."""
+    out = []
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, list):
+            out.extend(value)
+        elif value:
+            out.append(value)
+    return out
+
+
 def _media_from_og(meta: dict) -> list:
-    """og: tags -> media list. og:video (muxed mp4 with audio) first, then
-    every og:image in order (galleries emit one per photo)."""
+    """og: tags -> media list. First motion og:video (skipping audio-cover
+    stills), then every og:image in order (galleries emit one per photo)."""
     media = []
-    video_url = meta.get("og:video:secure_url") or meta.get("og:video")
-    if video_url and not is_audio_cover_url(video_url):
+    seen = set()
+    for video_url in _og_values(
+        meta, "og:video:secure_url", "og:video", "og:video:url", "twitter:player:stream",
+    ):
+        if not video_url or video_url in seen:
+            continue
+        seen.add(video_url)
+        if is_audio_cover_url(video_url):
+            continue
         media.append({"kind": "video", "url": video_url})
-    for img in meta.get("og:image", []):
+        break
+    for img in _og_values(meta, "og:image"):
         if is_audio_cover_url(img):
             continue
-        kind = "gif" if img.split("?")[0].lower().endswith(".gif") else "image"
+        kind = "gif" if str(img).split("?")[0].lower().endswith(".gif") else "image"
         media.append({"kind": kind, "url": img})
     return filter_proxy_media(media)
 
