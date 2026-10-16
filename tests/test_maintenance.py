@@ -53,6 +53,29 @@ def _pr(*, login="dependabot[bot]", sha=SHA, ref="dependabot/pip/foo", draft=Fal
     }
 
 
+def _producer(**overrides):
+    """A fully identified, successfully completed producer record."""
+    data = {
+        "workflow": ".github/workflows/ci.yml",
+        "job": "application",
+        "check_run_id": 5,
+        "run_id": 38830784916,
+        "job_id": 116749043297,
+        "job_record_id": 116749043297,
+        "job_run_id": 38830784916,
+        "run_attempt": 1,
+        "job_run_attempt": 1,
+        "head_sha": SHA,
+        "job_head_sha": SHA,
+        "job_status": "completed",
+        "job_conclusion": "success",
+        "run_status": "completed",
+        "run_conclusion": "success",
+    }
+    data.update(overrides)
+    return data
+
+
 def _snapshot(**overrides):
     data = {
         "repository": "uesu/News-Express",
@@ -67,17 +90,7 @@ def _snapshot(**overrides):
         "legacy_statuses": [],
         # The producer binding is part of a well-formed snapshot: without it the
         # gate fail-closes, which is the point of the new check.
-        "producer_evidence": {
-            "application": {
-                "workflow": ".github/workflows/ci.yml",
-                "job": "application",
-                "run_id": 38830784916,
-                "job_id": 116749043297,
-                "run_attempt": 1,
-                "head_sha": SHA,
-                "conclusion": "success",
-            }
-        },
+        "producer_evidence": {"application": _producer()},
         "security_evidence": {},
         "risk": {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"},
         "variables": {"AUTO_MERGE_DEPENDABOT": "yes", "AUTO_MERGE_PYTHON_BUMP": "yes"},
@@ -89,6 +102,9 @@ def _snapshot(**overrides):
                 "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
             },
             "required_security_evidence": [],
+            # An explicit test-policy decision, not an empty list standing in for
+            # one. Production declares mode=required and fails closed instead.
+            "security_evidence_mode": "disabled",
             "human_review_labels": ["review-required", "do-not-merge", "hold"],
             "updater_identities": {
                 "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
@@ -1209,17 +1225,7 @@ class CheckProducerBindingTests(unittest.TestCase):
     }
 
     def _evidence(self, **overrides):
-        base = {
-            "workflow": ".github/workflows/ci.yml",
-            "job": "application",
-            "run_id": 1,
-            "job_id": 2,
-            "run_attempt": 1,
-            "head_sha": SHA,
-            "conclusion": "success",
-        }
-        base.update(overrides)
-        return {"application": base}
+        return {"application": _producer(**overrides)}
 
     _UNSET = object()
 
@@ -1275,12 +1281,7 @@ class CheckProducerBindingTests(unittest.TestCase):
     def test_a_same_named_check_from_a_foreign_workflow_blocks_the_merge(self):
         snapshot = _snapshot(
             producer_evidence={
-                "application": {
-                    "workflow": ".github/workflows/not-ci.yml",
-                    "job": "application",
-                    "run_id": 1, "job_id": 2, "run_attempt": 1,
-                    "head_sha": SHA, "conclusion": "success",
-                }
+                "application": _producer(workflow=".github/workflows/not-ci.yml")
             }
         )
         decision = maintenance.decide_merge(snapshot)
@@ -1357,6 +1358,7 @@ class LiveProducerCollectionTests(unittest.TestCase):
             "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
         },
         "dependabot_allowed_files": ["requirements.txt", "requirements.in"],
+        "security_evidence": {"mode": "disabled", "required": []},
         "updater_identities": {
             "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
         },
@@ -1379,9 +1381,15 @@ class LiveProducerCollectionTests(unittest.TestCase):
     def _responder(self, *, job_status=200, run_status=200, workflow=".github/workflows/ci.yml"):
         def responder(url, *a, **k):
             if "/actions/jobs/88" in url:
-                return job_status, {"name": "application", "head_sha": SHA, "conclusion": "success"}
+                return job_status, {
+                    "id": 88, "run_id": 77, "name": "application", "head_sha": SHA,
+                    "run_attempt": 1, "status": "completed", "conclusion": "success",
+                }
             if "/actions/runs/77" in url:
-                return run_status, {"path": workflow, "head_sha": SHA, "run_attempt": 1}
+                return run_status, {
+                    "id": 77, "path": workflow, "head_sha": SHA, "run_attempt": 1,
+                    "status": "completed", "conclusion": "success",
+                }
             if "/pulls/12/files" in url:
                 return 200, []
             if "/pulls/12/reviews" in url:
@@ -1446,6 +1454,346 @@ class LiveProducerCollectionTests(unittest.TestCase):
         decision = maintenance.decide_merge(snapshot)
         self.assertEqual(decision.action, "fail")
         self.assertEqual(decision.reason, "unapproved-producer-workflow:application")
+
+
+class ScanEvidenceShapeTests(unittest.TestCase):
+    """Analyses describe scan executions; only alerts describe findings."""
+
+    SHA = SHA
+    HEAD_ANALYSIS = {
+        "ref": "refs/heads/main", "commit_sha": SHA, "results_count": 4,
+        "category": "/codeql", "error": None, "results_url": "u",
+    }
+
+    def _collect(self, responder, required=("code-scanning",)):
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            return maintenance.collect_security_evidence("o", "r", SHA, "token", list(required))
+        finally:
+            maintenance._github_json = original
+
+    def _responder(self, *, analyses=None, alerts=None,
+                   analyses_status=200, alerts_status=200):
+        def responder(url, *a, **k):
+            if "code-scanning/analyses" in url:
+                return analyses_status, [] if analyses is None else analyses
+            if "code-scanning/alerts" in url:
+                return alerts_status, [] if alerts is None else alerts
+            return 404, {}
+        return responder
+
+    def test_the_open_count_comes_from_alerts_not_from_analyses(self):
+        # Regression: the collector read code-scanning/analyses and counted
+        # most_recent_instance.state, a field that only exists on alert records.
+        # An analysis carrying results_count: 4 was reported as zero open, so the
+        # findings state was never actually obtained.
+        alert = {"number": 9, "state": "open",
+                 "most_recent_instance": {"state": "open", "commit_sha": SHA}}
+        result = self._collect(
+            self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert])
+        )
+        self.assertEqual(result["code-scanning"]["open"], 1,
+                         "the count must reflect alerts, not the analysis record")
+        self.assertEqual(result["code-scanning"].get("analyses"), 1)
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"],
+            "failed",
+        )
+
+    def test_an_analysis_shaped_payload_is_not_read_as_alerts(self):
+        # If the alerts endpoint returns analysis-shaped records, there is no
+        # open/resolved field to count, and that must not read as zero open.
+        result = self._collect(
+            self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[self.HEAD_ANALYSIS])
+        )
+        self.assertEqual(result["code-scanning"]["state"], "malformed")
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+        )
+
+    def test_open_alerts_from_the_alerts_endpoint_block(self):
+        alert = {"number": 7, "state": "open",
+                 "most_recent_instance": {"state": "open", "commit_sha": SHA}}
+        result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert]))
+        self.assertEqual(result["code-scanning"]["state"], "ok")
+        self.assertEqual(result["code-scanning"]["open"], 1)
+        verdict = maintenance.verify_security_evidence(result, ["code-scanning"])
+        self.assertEqual(verdict["state"], "failed")
+        self.assertEqual(verdict["reason"], "unresolved-code-scanning-alerts:1")
+
+    def test_resolved_alerts_do_not_block(self):
+        alert = {"number": 7, "state": "dismissed",
+                 "most_recent_instance": {"state": "resolved", "commit_sha": SHA}}
+        result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert]))
+        self.assertEqual(result["code-scanning"]["open"], 0)
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "ready"
+        )
+
+    def test_no_scan_on_this_head_is_unavailable_not_clean(self):
+        result = self._collect(self._responder(analyses=[], alerts=[]))
+        self.assertEqual(result["code-scanning"]["state"], "no-analysis-for-head")
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+        )
+
+    def test_a_stale_only_analysis_list_is_unavailable(self):
+        # An analysis for some other commit does not prove this head was scanned.
+        stale = dict(self.HEAD_ANALYSIS, commit_sha=SHA2)
+        result = self._collect(self._responder(analyses=[stale], alerts=[]))
+        self.assertEqual(result["code-scanning"]["state"], "no-analysis-for-head")
+
+    def test_an_errored_scan_is_not_clean(self):
+        errored = dict(self.HEAD_ANALYSIS, error="the analysis failed")
+        result = self._collect(self._responder(analyses=[errored], alerts=[]))
+        self.assertEqual(result["code-scanning"]["state"], "analysis-error")
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+        )
+
+    def test_a_denied_scan_api_is_unavailable_not_clean(self):
+        result = self._collect(
+            self._responder(analyses_status=403, alerts_status=403)
+        )
+        self.assertEqual(result["code-scanning"]["state"], "unavailable")
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+        )
+
+    def test_a_malformed_alert_page_is_not_clean(self):
+        result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[{"n": 1}]))
+        self.assertEqual(result["code-scanning"]["state"], "malformed")
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+        )
+
+    def test_secret_scanning_alerts_use_the_alert_state_field(self):
+        original = maintenance._github_json
+
+        def responder(url, *a, **k):
+            if "secret-scanning/alerts" in url:
+                return 200, [{"number": 3, "state": "open"}]
+            return 404, {}
+
+        maintenance._github_json = responder
+        try:
+            result = maintenance.collect_security_evidence(
+                "o", "r", SHA, "token", ["secret-scanning"]
+            )
+        finally:
+            maintenance._github_json = original
+        self.assertEqual(result["secret-scanning"], {"state": "ok", "open": 1})
+        self.assertEqual(
+            maintenance.verify_security_evidence(result, ["secret-scanning"])["state"], "failed"
+        )
+
+
+class SecurityPolicyModeTests(unittest.TestCase):
+    """An empty requirement list is not the same statement as no requirement."""
+
+    def test_naming_kinds_means_required(self):
+        mode, kinds = maintenance.security_policy(
+            {"security_evidence": {"mode": "required", "required": ["code-scanning"]}}
+        )
+        self.assertEqual((mode, kinds), ("required", ["code-scanning"]))
+
+    def test_an_explicit_disable_is_honoured_and_reported(self):
+        verdict = maintenance.verify_security_evidence(
+            {}, [], mode="disabled"
+        )
+        self.assertEqual(verdict["state"], "ready")
+        self.assertEqual(verdict["reason"], "security-evidence-not-required")
+
+    def test_an_unconfigured_gate_fails_closed(self):
+        # Regression: an empty list silently satisfied the gate, so a repository
+        # that never configured the requirement looked identical to a clean one.
+        for mode in ("", "required", "unconfigured"):
+            with self.subTest(mode=mode):
+                verdict = maintenance.verify_security_evidence({}, [], mode=mode)
+                self.assertEqual(verdict["state"], "failed", mode)
+                self.assertEqual(verdict["reason"], "security-evidence-unconfigured")
+
+    def test_absent_policy_is_unconfigured(self):
+        self.assertEqual(maintenance.security_policy({})[0], "unconfigured")
+
+    def test_legacy_flat_list_still_means_required(self):
+        mode, kinds = maintenance.security_policy(
+            {"required_security_evidence": ["secret-scanning"]}
+        )
+        self.assertEqual((mode, kinds), ("required", ["secret-scanning"]))
+
+    def test_an_unconfigured_gate_blocks_the_merge(self):
+        snapshot = _snapshot()
+        snapshot["policy"]["security_evidence_mode"] = "unconfigured"
+        snapshot["policy"]["required_security_evidence"] = []
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "security-evidence-unconfigured")
+
+    def test_an_explicitly_disabled_gate_still_merges(self):
+        decision = maintenance.decide_merge(_snapshot())
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+
+class ProducerOutcomeTests(unittest.TestCase):
+    """Identity is not enough: the producer must have succeeded on this head."""
+
+    APPROVED = {
+        "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+    }
+
+    def _verify(self, **overrides):
+        return maintenance.verify_check_producers(
+            {"application": _producer(**overrides)},
+            expected_names=["application"],
+            head_sha=SHA,
+            producers=self.APPROVED,
+        )
+
+    def test_a_fully_identified_successful_producer_passes(self):
+        self.assertEqual(self._verify()["state"], "ready")
+
+    def test_a_failed_job_never_passes_on_identity_alone(self):
+        # Regression: the verifier ignored conclusion, run/job ids and attempt,
+        # so a failed producer with matching names read as producers-verified.
+        verdict = self._verify(job_conclusion="failure")
+        self.assertEqual(verdict["state"], "failed")
+        self.assertEqual(verdict["reason"], "producer-job-not-successful:application:failure")
+
+    def test_every_identity_and_outcome_gap_blocks(self):
+        cases = {
+            "cancelled job": ({"job_conclusion": "cancelled"},
+                              "producer-job-not-successful:application:cancelled"),
+            "job still running": ({"job_status": "in_progress"},
+                                  "producer-job-not-completed:application:in_progress"),
+            "failed run": ({"run_conclusion": "failure"},
+                           "producer-run-not-successful:application:failure"),
+            "run still queued": ({"run_status": "queued"},
+                                 "producer-run-not-completed:application:queued"),
+            "missing run id": ({"run_id": None}, "producer-missing-run-id:application"),
+            "zero run id": ({"run_id": 0}, "producer-missing-run-id:application"),
+            "missing job id": ({"job_id": None}, "producer-missing-job-id:application"),
+            "missing attempt": ({"run_attempt": None},
+                                "producer-missing-run-attempt:application"),
+            "job from another run": ({"job_run_id": 999},
+                                     "producer-run-id-mismatch:application"),
+            "wrong check/job link": ({"job_record_id": 424242},
+                                     "producer-job-id-mismatch:application"),
+            "stale attempt": ({"job_run_attempt": 1, "run_attempt": 2},
+                              "producer-attempt-mismatch:application"),
+            "job on another head": ({"job_head_sha": SHA2},
+                                    "producer-job-head-mismatch:application"),
+        }
+        for label, (overrides, expected) in cases.items():
+            with self.subTest(case=label):
+                verdict = self._verify(**overrides)
+                self.assertEqual(verdict["state"], "failed", label)
+                self.assertEqual(verdict["reason"], expected, label)
+
+    def test_a_green_same_named_check_does_not_compensate(self):
+        # The check run itself is green, but the producer behind it failed.
+        snapshot = _snapshot(
+            checks=[{
+                "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+                "conclusion": "success", "app": {"slug": "github-actions"},
+            }],
+            producer_evidence={"application": _producer(job_conclusion="failure")},
+        )
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-job-not-successful:application:failure")
+
+
+class LiveProducerOutcomeTests(unittest.TestCase):
+    """Collector and verifier together against REST-shaped payloads."""
+
+    EVENT = {
+        "repository": {"full_name": "acme/app", "default_branch": "main"},
+        "pull_request": {"number": 12, "head": {"sha": SHA}},
+    }
+    PROFILE = {
+        "mandatory_check_names": ["application"],
+        "check_producers": {
+            "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+        },
+        "dependabot_allowed_files": ["requirements.txt"],
+        "security_evidence": {"mode": "disabled", "required": []},
+        "updater_identities": {
+            "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
+        },
+    }
+    FILES = [{"filename": "requirements.txt", "patch": "-aiohttp==3.14.4\n+aiohttp==3.14.5\n"}]
+    CHECK = {
+        "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+        "conclusion": "success", "app": {"slug": "github-actions"},
+        "details_url": "https://github.com/acme/app/actions/runs/77/job/88",
+    }
+
+    def _snapshot_with(self, *, job=None, run=None):
+        job_payload = {
+            "id": 88, "run_id": 77, "name": "application", "head_sha": SHA,
+            "run_attempt": 1, "status": "completed", "conclusion": "success",
+        }
+        run_payload = {
+            "id": 77, "path": ".github/workflows/ci.yml", "head_sha": SHA,
+            "run_attempt": 1, "status": "completed", "conclusion": "success",
+        }
+        job_payload.update(job or {})
+        run_payload.update(run or {})
+
+        def responder(url, *a, **k):
+            if "/actions/jobs/88" in url:
+                return 200, job_payload
+            if "/actions/runs/77" in url:
+                return 200, run_payload
+            if "/pulls/12/files" in url:
+                return 200, []
+            if "/pulls/12/reviews" in url:
+                return 200, []
+            if "/check-runs" in url:
+                return 200, {"check_runs": [self.CHECK], "total_count": 1}
+            if url.endswith("/status"):
+                return 200, {"state": "success", "statuses": []}
+            if url.endswith("/pulls/12"):
+                return 200, _pr()
+            return 404, {}
+
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            snapshot = maintenance.build_live_snapshot(self.EVENT, "token", self.PROFILE)
+        finally:
+            maintenance._github_json = original
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(head_repo="acme/app", base_repo="acme/app", sha=SHA)
+        snapshot["files"] = self.FILES
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"}
+        snapshot["variables"] = {"AUTO_MERGE_DEPENDABOT": "yes"}
+        return snapshot
+
+    def test_a_successful_producer_reaches_merge(self):
+        decision = maintenance.decide_merge(self._snapshot_with())
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+    def test_a_failed_producer_blocks_even_though_the_check_is_green(self):
+        snapshot = self._snapshot_with(job={"conclusion": "failure"})
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-job-not-successful:application:failure")
+
+    def test_a_job_from_another_run_blocks(self):
+        snapshot = self._snapshot_with(job={"run_id": 999})
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-run-id-mismatch:application")
+
+    def test_a_stale_attempt_blocks(self):
+        snapshot = self._snapshot_with(run={"run_attempt": 2})
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-attempt-mismatch:application")
 
 
 if __name__ == "__main__":

@@ -540,7 +540,12 @@ def collect_producer_evidence(
     expected_names: Sequence[str],
     token: str,
 ) -> dict[str, Any]:
-    """Resolve each mandatory check to the workflow run and job that produced it."""
+    """Resolve each mandatory check to the workflow run and job that produced it.
+
+    Every field the verifier needs for identity is recorded here: the check run's
+    own id, the job and run identifiers from the resolved URL, the attempt each
+    side reports, and the completion state of both.
+    """
     expected = {n for n in expected_names if n}
     evidence: dict[str, Any] = {}
     for run in check_runs or []:
@@ -571,13 +576,30 @@ def collect_producer_evidence(
         evidence[check_name] = {
             "workflow": str(wf_run.get("path") or ""),
             "job": str(job.get("name") or ""),
+            "check_run_id": _as_positive_int(run.get("id")),
             "run_id": run_id,
             "job_id": job_id,
-            "run_attempt": int(wf_run.get("run_attempt") or 0),
-            "head_sha": str(wf_run.get("head_sha") or job.get("head_sha") or ""),
-            "conclusion": str(job.get("conclusion") or ""),
+            "job_record_id": _as_positive_int(job.get("id")),
+            "job_run_id": _as_positive_int(job.get("run_id")),
+            "run_attempt": _as_positive_int(wf_run.get("run_attempt")),
+            "job_run_attempt": _as_positive_int(job.get("run_attempt")),
+            "head_sha": str(wf_run.get("head_sha") or ""),
+            "job_head_sha": str(job.get("head_sha") or ""),
+            "job_status": str(job.get("status") or ""),
+            "job_conclusion": str(job.get("conclusion") or ""),
+            "run_status": str(wf_run.get("status") or ""),
+            "run_conclusion": str(wf_run.get("conclusion") or ""),
         }
     return evidence
+
+
+def _as_positive_int(value: Any) -> int | None:
+    """Return a positive int, or None when the value is absent or not one."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def verify_check_producers(
@@ -587,7 +609,13 @@ def verify_check_producers(
     head_sha: str,
     producers: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Pure producer binding. Every gap blocks; nothing is inferred from a name."""
+    """Pure producer binding. Every gap blocks; nothing is inferred from a name.
+
+    Matching workflow, job and head are not enough. The job has to be the one the
+    check run pointed at, it has to belong to the run that was fetched, both have
+    to describe the same attempt, and both have to have completed successfully. A
+    separately green same-named check does not compensate for a failed producer.
+    """
     if not producers:
         return {"state": "failed", "reason": "no-approved-producers-configured"}
     for check_name in expected_names:
@@ -602,23 +630,94 @@ def verify_check_producers(
                 "state": "failed",
                 "reason": f"producer-evidence-unavailable:{check_name}:{found['error']}",
             }
+
+        failure = _producer_identity_failure(check_name, found)
+        if failure:
+            return {"state": "failed", "reason": failure}
+
         if str(found.get("workflow") or "") != str(approved.get("workflow") or ""):
             return {"state": "failed", "reason": f"unapproved-producer-workflow:{check_name}"}
         if str(found.get("job") or "") != str(approved.get("job") or ""):
             return {"state": "failed", "reason": f"unapproved-producer-job:{check_name}"}
         if str(found.get("head_sha") or "") != str(head_sha):
             return {"state": "failed", "reason": f"producer-head-mismatch:{check_name}"}
+        if str(found.get("job_head_sha") or "") != str(head_sha):
+            return {"state": "failed", "reason": f"producer-job-head-mismatch:{check_name}"}
+
+        outcome = _producer_outcome_failure(check_name, found)
+        if outcome:
+            return {"state": "failed", "reason": outcome}
     return {"state": "ready", "reason": "producers-verified"}
 
 
-# Security evidence is retrieved rather than assumed. The scan APIs are separate
-# from check runs, so a green `workflow-security` job does not by itself prove
-# there are no open findings.
+def _producer_identity_failure(check_name: str, found: Mapping[str, Any]) -> str:
+    """Reject evidence whose identifiers do not tie the check to the job and run."""
+    run_id = found.get("run_id")
+    job_id = found.get("job_id")
+    if not isinstance(run_id, int) or run_id <= 0:
+        return f"producer-missing-run-id:{check_name}"
+    if not isinstance(job_id, int) or job_id <= 0:
+        return f"producer-missing-job-id:{check_name}"
+    # The check run's details_url named this job; the fetched job must be it.
+    if found.get("job_record_id") != job_id:
+        return f"producer-job-id-mismatch:{check_name}"
+    # The job must belong to the run that was fetched, not merely share a name.
+    if found.get("job_run_id") != run_id:
+        return f"producer-run-id-mismatch:{check_name}"
+    run_attempt = found.get("run_attempt")
+    if not isinstance(run_attempt, int) or run_attempt <= 0:
+        return f"producer-missing-run-attempt:{check_name}"
+    # A job from an earlier attempt is stale evidence for this run.
+    if found.get("job_run_attempt") != run_attempt:
+        return f"producer-attempt-mismatch:{check_name}"
+    return ""
 
-_SECURITY_ENDPOINTS = {
-    "code-scanning": "code-scanning/analyses?per_page=100",
-    "secret-scanning": "secret-scanning/alerts?state=open&per_page=100",
-}
+
+def _producer_outcome_failure(check_name: str, found: Mapping[str, Any]) -> str:
+    """Require a successful completed job and run, not just a familiar identity."""
+    if str(found.get("job_status") or "") != "completed":
+        return f"producer-job-not-completed:{check_name}:{found.get('job_status') or 'unknown'}"
+    if str(found.get("job_conclusion") or "") != "success":
+        return f"producer-job-not-successful:{check_name}:{found.get('job_conclusion') or 'unknown'}"
+    if str(found.get("run_status") or "") != "completed":
+        return f"producer-run-not-completed:{check_name}:{found.get('run_status') or 'unknown'}"
+    if str(found.get("run_conclusion") or "") != "success":
+        return f"producer-run-not-successful:{check_name}:{found.get('run_conclusion') or 'unknown'}"
+    return ""
+
+
+# Security evidence is retrieved rather than assumed, and the two GitHub APIs are
+# not interchangeable. `code-scanning/analyses` describes scan *executions* and
+# carries results_count; it has no open/resolved state. Only
+# `code-scanning/alerts` describes findings. Counting an alert-only field on an
+# analysis record silently yields zero, so the analyses list is used to prove a
+# scan completed on this head, and the alerts list to establish the findings.
+
+_CODE_SCAN_ANALYSES = "code-scanning/analyses"
+_CODE_SCAN_ALERTS = "code-scanning/alerts"
+_SECRET_SCAN_ALERTS = "secret-scanning/alerts"
+
+
+def security_policy(source: Mapping[str, Any] | None) -> tuple[str, list[str]]:
+    """Resolve the security-evidence policy as (mode, required kinds).
+
+    A repository either requires named scan evidence or has deliberately declared
+    that it requires none. Those are different statements, and only the second
+    one is allowed to skip the gate, so the mode has to be explicit rather than
+    inferred from an empty list.
+    """
+    source = source if isinstance(source, Mapping) else {}
+    block = source.get("security_evidence")
+    if isinstance(block, dict):
+        mode = str(block.get("mode") or "")
+        kinds = [str(k) for k in (block.get("required") or []) if k]
+    else:
+        # Flat legacy form: naming kinds means they are required.
+        mode = ""
+        kinds = [str(k) for k in (source.get("required_security_evidence") or []) if k]
+    if kinds:
+        return "required", kinds
+    return ("disabled" if mode == "disabled" else "unconfigured"), []
 
 
 def collect_security_evidence(
@@ -628,48 +727,106 @@ def collect_security_evidence(
     token: str,
     required: Sequence[str],
 ) -> dict[str, Any]:
-    """Retrieve actual scan outcomes for the required kinds."""
+    """Retrieve actual scan completion and findings for the required kinds."""
     out: dict[str, Any] = {}
     for kind in required or []:
         key = str(kind)
-        endpoint = _SECURITY_ENDPOINTS.get(key)
-        if not endpoint:
-            out[key] = {"state": "unknown-kind"}
-            continue
-        status, payload = _github_json(
-            f"https://api.github.com/repos/{owner}/{name}/{endpoint}", token
-        )
-        if status == 404:
-            out[key] = {"state": "not-enabled"}
-        elif status != 200:
-            # 403 in particular: the token lacks the scope, which is unavailable
-            # evidence, not an absence of findings.
-            out[key] = {"state": "unavailable", "detail": f"http:{status}"}
-        elif not isinstance(payload, list):
-            out[key] = {"state": "malformed"}
+        if key == "code-scanning":
+            out[key] = _collect_code_scanning(owner, name, head_sha, token)
+        elif key == "secret-scanning":
+            out[key] = _collect_alerts(owner, name, _SECRET_SCAN_ALERTS, token, key)
         else:
-            if key == "code-scanning":
-                relevant = [
-                    item for item in payload
-                    if isinstance(item, dict) and str(item.get("commit_sha") or "") == head_sha
-                ]
-                open_items = [
-                    item for item in relevant
-                    if str((item.get("most_recent_instance") or {}).get("state") or "") == "open"
-                ]
-            else:
-                open_items = [item for item in payload if isinstance(item, dict)]
-            out[key] = {"state": "ok", "open": len(open_items)}
+            out[key] = {"state": "unknown-kind"}
     return out
+
+
+def _collect_code_scanning(owner: str, name: str, head_sha: str, token: str) -> dict[str, Any]:
+    base = f"https://api.github.com/repos/{owner}/{name}"
+    status, analyses = _api_pages(
+        f"{base}/{_CODE_SCAN_ANALYSES}?commit_sha={head_sha}&per_page=100&page=1", token
+    )
+    if status != 200:
+        return {"state": "unavailable", "detail": f"analyses-http:{status}"}
+    if not isinstance(analyses, list):
+        return {"state": "malformed"}
+    # Do not trust the query filter alone: confirm the returned records are for
+    # this head. A stale-only list does not prove this commit was scanned.
+    current = [
+        item for item in analyses
+        if isinstance(item, dict) and str(item.get("commit_sha") or "") == head_sha
+    ]
+    if not current:
+        # No analysis for this head means the scan did not run here. That is not
+        # an absence of findings.
+        return {"state": "no-analysis-for-head"}
+    analyses = current
+    errored = [
+        item for item in analyses
+        if isinstance(item, dict) and item.get("error") not in (None, "")
+    ]
+    if errored:
+        return {"state": "analysis-error", "count": len(errored)}
+    result = _collect_alerts(owner, name, _CODE_SCAN_ALERTS, token, "code-scanning")
+    if result.get("state") != "ok":
+        return result
+    result["analyses"] = len(analyses)
+    return result
+
+
+def _collect_alerts(
+    owner: str, name: str, endpoint: str, token: str, key: str
+) -> dict[str, Any]:
+    base = f"https://api.github.com/repos/{owner}/{name}"
+    status, alerts = _api_pages(f"{base}/{endpoint}?state=open&per_page=100&page=1", token)
+    if status != 200:
+        # 403 in particular: the token lacks the scope. That is unavailable
+        # evidence, not an absence of findings.
+        return {"state": "unavailable", "detail": f"alerts-http:{status}"}
+    if not isinstance(alerts, list):
+        return {"state": "malformed"}
+    open_count = _count_open_alerts(alerts, code_scanning=key == "code-scanning")
+    if open_count is None:
+        # A record missing the alert-only field is not proof of zero open alerts.
+        return {"state": "malformed"}
+    return {"state": "ok", "open": open_count}
+
+
+def _count_open_alerts(alerts: Sequence[Any], *, code_scanning: bool) -> int | None:
+    """Count open alerts, or return None if the payload is not alert-shaped."""
+    total = 0
+    for item in alerts:
+        if not isinstance(item, dict):
+            return None
+        if code_scanning:
+            instance = item.get("most_recent_instance")
+            if not isinstance(instance, dict):
+                return None
+            if str(instance.get("state") or "") == "open":
+                total += 1
+        else:
+            if str(item.get("state") or "") == "open":
+                total += 1
+    return total
 
 
 def verify_security_evidence(
     evidence: Mapping[str, Any] | None,
     required: Sequence[str],
+    *,
+    mode: str = "",
 ) -> dict[str, Any]:
-    """Open findings block; unavailable evidence defers. Neither reads as clean."""
-    for kind in required or []:
-        key = str(kind)
+    """Open findings block; unavailable evidence defers. Neither reads as clean.
+
+    An empty requirement list is not a pass. It is either a documented decision
+    that this repository requires no scan evidence, or a configuration gap, and
+    the two are reported differently rather than both reading as satisfied.
+    """
+    kinds = [str(kind) for kind in (required or []) if kind]
+    if not kinds:
+        if str(mode) == "disabled":
+            return {"state": "ready", "reason": "security-evidence-not-required"}
+        return {"state": "failed", "reason": "security-evidence-unconfigured"}
+    for key in kinds:
         found = (evidence or {}).get(key)
         if not isinstance(found, dict):
             return {"state": "defer", "reason": f"security-evidence-missing:{key}"}
@@ -916,24 +1073,25 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
 
     # Scan outcomes are separate evidence from the checks that report them.
     required_security = list(policy.get("required_security_evidence") or [])
-    if required_security:
-        security = verify_security_evidence(
-            snapshot.get("security_evidence"), required_security
+    security = verify_security_evidence(
+        snapshot.get("security_evidence"),
+        required_security,
+        mode=str(policy.get("security_evidence_mode") or ""),
+    )
+    if security.get("state") == "failed":
+        return Decision(
+            "fail",
+            str(security.get("reason") or "security-evidence"),
+            risk="blocked",
+            checks=classified.get("checks") or {},
         )
-        if security.get("state") == "failed":
-            return Decision(
-                "fail",
-                str(security.get("reason") or "security-evidence"),
-                risk="blocked",
-                checks=classified.get("checks") or {},
-            )
-        if security.get("state") != "ready":
-            return Decision(
-                "defer",
-                str(security.get("reason") or "security-evidence-unavailable"),
-                risk="blocked",
-                checks=classified.get("checks") or {},
-            )
+    if security.get("state") != "ready":
+        return Decision(
+            "defer",
+            str(security.get("reason") or "security-evidence-unavailable"),
+            risk="blocked",
+            checks=classified.get("checks") or {},
+        )
 
     risk_info = snapshot.get("risk") or {"risk": "review-required", "auto_eligible": False}
     risk = str(risk_info.get("risk") or "review-required")
@@ -1159,7 +1317,7 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
     producer_evidence = collect_producer_evidence(
         owner, name, check_runs if isinstance(check_runs, list) else [], mandatory, token
     )
-    required_security = list(profile.get("required_security_evidence") or [])
+    _security_mode, required_security = security_policy(profile)
     security_evidence = collect_security_evidence(
         owner, name, head_sha, token, required_security
     )
@@ -1220,7 +1378,8 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
             "default_branch": default_branch,
             "mandatory_check_names": profile.get("mandatory_check_names") or [],
             "check_producers": profile.get("check_producers") or {},
-            "required_security_evidence": profile.get("required_security_evidence") or [],
+            "security_evidence_mode": security_policy(profile)[0],
+            "required_security_evidence": required_security,
             "human_review_labels": profile.get("human_review_labels") or list(HOLD_LABELS_FALLBACK),
             "updater_identities": profile.get("updater_identities") or {},
             "allowed_merge_method": profile.get("allowed_merge_method") or "squash",

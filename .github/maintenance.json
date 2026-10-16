@@ -238,6 +238,12 @@
       "job": "maintenance-ci"
     }
   },
-  "required_security_evidence": [],
-  "security_evidence_note": "Kinds the merge controller must retrieve real findings for before merging. Empty because the runtime token is denied code-scanning and secret-scanning (HTTP 403), so no scan outcome can be read; unavailable evidence defers rather than reading as clean. Grant the scope, then list the kinds here."
+  "security_evidence": {
+    "mode": "required",
+    "required": [
+      "code-scanning",
+      "secret-scanning"
+    ],
+    "note": "Intended security gates. mode=required means the merge controller defers when this evidence cannot be read, rather than treating it as clean. The runtime token is currently denied code-scanning and secret-scanning (HTTP 403), so auto-merge defers until the scope is granted. That is the intended fail-closed behaviour: an unavailable required gate is not a passed gate. Set mode=disabled only as a deliberate, documented decision that this repository requires no scan evidence."
+  }
 }
