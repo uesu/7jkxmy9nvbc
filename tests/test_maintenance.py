@@ -546,6 +546,80 @@ class HashMutationTests(unittest.TestCase):
         self.assertEqual(risk["risk"], "routine")
         self.assertEqual(risk["members"], 2)
 
+    def test_unassociated_hash_in_a_later_hunk_requires_review(self):
+        # Regression: a hunk header was skipped without ending ownership of the
+        # previous hunk's package, so a digest swap with no owning version line
+        # was attributed to an unrelated upgrade and auto-merged as routine.
+        patch = (
+            "--- a/requirements.txt\n+++ b/requirements.txt\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-aiohttp==3.14.5 \\\n+aiohttp==3.14.6 \\\n"
+            "@@ -100,1 +100,1 @@\n"
+            '-    --hash=sha256:%s\n+    --hash=sha256:%s\n' % ("b" * 64, "c" * 64)
+        )
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "review-required")
+        self.assertFalse(risk["auto_eligible"])
+        self.assertEqual(risk["reason"], "hash-change-without-package-context")
+
+    def test_hash_hunk_before_the_upgrade_hunk_requires_review(self):
+        patch = (
+            "--- a/requirements.txt\n+++ b/requirements.txt\n"
+            "@@ -1,1 +1,1 @@\n"
+            '-    --hash=sha256:%s\n+    --hash=sha256:%s\n' % ("b" * 64, "c" * 64)
+            + "@@ -50,2 +50,2 @@\n"
+            + "-aiohttp==3.14.5 \\\n+aiohttp==3.14.6 \\\n"
+        )
+        self.assertEqual(
+            self._risk(patch)["reason"], "hash-change-without-package-context"
+        )
+
+    def test_isolated_hash_only_hunk_requires_review(self):
+        # A digest swap with no version line anywhere is a change, not an
+        # unparseable patch; the reason must say so precisely.
+        patch = (
+            "--- a/requirements.txt\n+++ b/requirements.txt\n"
+            "@@ -100,1 +100,1 @@\n"
+            '-    --hash=sha256:%s\n+    --hash=sha256:%s\n' % ("b" * 64, "c" * 64)
+        )
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "review-required")
+        self.assertEqual(risk["reason"], "hash-change-without-package-context")
+
+    def test_upgraded_package_hashes_in_a_later_hunk_stay_routine(self):
+        # The conservative rule must not break legitimate regeneration: when the
+        # hunk carrying the digests also carries the version line as context, the
+        # ownership is proven and the change is routine.
+        patch = (
+            "--- a/requirements.txt\n+++ b/requirements.txt\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-aiohttp==3.14.5 \\\n+aiohttp==3.14.6 \\\n"
+            "@@ -98,3 +98,3 @@\n"
+            " aiohttp==3.14.6 \\\n"
+            '-    --hash=sha256:%s\n+    --hash=sha256:%s\n' % ("b" * 64, "c" * 64)
+        )
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "routine")
+        self.assertTrue(risk["auto_eligible"])
+
+    def test_reordered_hunks_with_context_stay_routine(self):
+        patch = (
+            "--- a/requirements.txt\n+++ b/requirements.txt\n"
+            "@@ -1,4 +1,4 @@\n"
+            "-yarl==1.25.0 \\\n"
+            '-    --hash=sha256:%s\n' % ("b" * 64)
+            + "+yarl==1.25.1 \\\n"
+            '+    --hash=sha256:%s\n' % ("c" * 64)
+            + "@@ -20,4 +20,4 @@\n"
+            "-attrs==25.1.0 \\\n"
+            '-    --hash=sha256:%s\n' % ("d" * 64)
+            + "+attrs==25.1.1 \\\n"
+            '+    --hash=sha256:%s\n' % ("e" * 64)
+        )
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "routine")
+        self.assertEqual(risk["members"], 2)
+
 
 class ForcedVersionVerificationTests(unittest.TestCase):
     """A well-formed version string is not proof the release exists."""

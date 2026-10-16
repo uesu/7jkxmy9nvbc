@@ -1100,9 +1100,14 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
     saw_change = False
     unsafe: list[str] = []
     hash_changed: set[str] = set()
+    orphan_hashes = 0
     current_pkg: str | None = None
     for line in patch.splitlines():
-        if line.startswith(("---", "+++")) or line.startswith("@@"):
+        if line.startswith(("@@", "---", "+++")):
+            # A hunk boundary ends the evidence for who owns a hash line. Carrying
+            # the previous hunk's package forward is how an unrelated digest swap
+            # got attributed to a legitimate upgrade elsewhere in the file.
+            current_pkg = None
             continue
         # Track the package a hash line belongs to. Context lines matter here: in
         # a lock diff the `idna==3.20 \` line is unchanged while the hashes under
@@ -1111,8 +1116,17 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
         if owner:
             current_pkg = owner.group(2).lower()
         elif _REQ_HASH_LINE_RE.match(line[1:] if line[:1] in "+-" else line):
-            if line[:1] in ("+", "-") and current_pkg:
-                hash_changed.add(current_pkg)
+            if line[:1] in ("+", "-"):
+                # A swapped digest is a change in its own right, even when no
+                # version line accompanies it.
+                saw_change = True
+                if current_pkg:
+                    hash_changed.add(current_pkg)
+                else:
+                    # A digest change with no owning version line in its own hunk
+                    # is unattributed. Absent context is not proof it belongs to a
+                    # version transition that changed, so it cannot clear review.
+                    orphan_hashes += 1
         match = _REQ_VERSION_LINE_RE.match(line)
         if not match:
             if line[:1] in ("+", "-") and not _REQ_HASH_LINE_RE.match(line[1:]):
@@ -1145,6 +1159,10 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
         return [{"risk": "review-required", "auto_eligible": False,
                  "reason": unsafe[0], "name": filename,
                  "reasons": unsafe}]
+    if orphan_hashes:
+        return [{"risk": "review-required", "auto_eligible": False,
+                 "reason": "hash-change-without-package-context",
+                 "name": filename, "count": orphan_hashes}]
     # A hash that changed for a package whose version did NOT change is not lock
     # regeneration - it is a different artifact being pinned under the same name.
     for pkg in sorted(hash_changed):
