@@ -1,7 +1,9 @@
 """Offline maintenance policy tests — no GitHub writes, no posting."""
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -494,6 +496,56 @@ class RequirementsDirectiveTests(unittest.TestCase):
                 self.assertEqual(self._risk(patch)["risk"], "routine")
 
 
+class HashMutationTests(unittest.TestCase):
+    """A hash change must be explained by a version change to the same package."""
+
+    H = "a" * 64
+
+    def _risk(self, patch):
+        return maintenance.snapshot_risk_from_files(
+            [{"filename": "requirements.txt", "patch": patch}], None
+        )
+
+    def test_hash_swap_under_an_unchanged_package_requires_review(self):
+        # Regression: hash lines were treated as benign without being tied to a
+        # version transition, so a safe aiohttp patch concealed a swapped digest
+        # for idna, whose version line was unchanged context in the diff.
+        patch = (
+            f'-aiohttp==3.14.5 \\\n+aiohttp==3.14.6 \\\n     --hash=sha256:{self.H}\n'
+            f' idna==3.20 \\\n-    --hash=sha256:{"b" * 64}\n'
+            f'+    --hash=sha256:{"c" * 64}\n'
+        )
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "review-required")
+        self.assertFalse(risk["auto_eligible"])
+        self.assertEqual(risk["reason"], "hash-mutation-without-version-change")
+        self.assertEqual(risk["name"], "idna")
+
+    def test_hash_change_with_no_version_change_at_all(self):
+        patch = (
+            f' idna==3.20 \\\n-    --hash=sha256:{"b" * 64}\n'
+            f'+    --hash=sha256:{"c" * 64}\n'
+        )
+        self.assertEqual(self._risk(patch)["risk"], "review-required")
+
+    def test_regeneration_of_a_changed_version_stays_routine(self):
+        # The legitimate case must keep working: a version bump rewrites its own
+        # hashes, and that is exactly what a recompiled lock looks like.
+        patch = (
+            f'-aiohttp==3.14.5 \\\n-    --hash=sha256:{"b" * 64}\n'
+            f'+aiohttp==3.14.6 \\\n+    --hash=sha256:{self.H}\n'
+        )
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "routine")
+        self.assertTrue(risk["auto_eligible"])
+
+    def test_reordered_blocks_stay_routine(self):
+        patch = "-b==2.0.0\n+b==2.0.1\n-a==1.0.0\n+a==1.0.1\n"
+        risk = self._risk(patch)
+        self.assertEqual(risk["risk"], "routine")
+        self.assertEqual(risk["members"], 2)
+
+
 class ForcedVersionVerificationTests(unittest.TestCase):
     """A well-formed version string is not proof the release exists."""
 
@@ -663,6 +715,126 @@ class WorkflowActionClassificationTests(unittest.TestCase):
         # the diff contained no on:/permissions: lines.
         risk = self._risk("-        run: pip install foo\n+        run: pip install foo --upgrade\n")
         self.assertEqual(risk["reason"], "workflow-non-pin-change")
+
+
+class CheckAuthenticationTests(unittest.TestCase):
+    """A familiar check name is not evidence of who produced it, or for which head."""
+
+    EXPECTED = ["application"]
+    GOOD = {"id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+            "conclusion": "success", "app": {"slug": "github-actions"}}
+
+    def _classify(self, runs):
+        return maintenance.classify_checks(
+            runs, expected_names=self.EXPECTED, head_sha=SHA
+        )
+
+    def test_a_complete_trusted_check_is_ready(self):
+        self.assertEqual(self._classify([self.GOOD])["state"], "ready")
+
+    def test_mandatory_checks_require_authentication(self):
+        cases = {
+            "no head_sha": {k: v for k, v in self.GOOD.items() if k != "head_sha"},
+            "no app": {k: v for k, v in self.GOOD.items() if k != "app"},
+            "foreign app": dict(self.GOOD, app={"slug": "some-other-app"}),
+            "wrong head_sha": dict(self.GOOD, head_sha=SHA2),
+        }
+        for label, run in cases.items():
+            with self.subTest(case=label):
+                result = self._classify([run])
+                self.assertEqual(result["state"], "failed", label)
+
+    def test_no_checks_is_never_ready(self):
+        self.assertEqual(self._classify([])["state"], "failed")
+
+    def test_an_unrelated_check_cannot_satisfy_the_gate(self):
+        other = dict(self.GOOD, name="something-else", id=2)
+        self.assertEqual(self._classify([other])["state"], "failed")
+
+
+class PreMergeRefreshTests(unittest.TestCase):
+    """A second complete snapshot must be taken immediately before merging."""
+
+    def _run(self, snapshots, tmpdir):
+        event = tmpdir / "event.json"
+        event.write_text("{}", encoding="utf-8")
+        saved = {
+            "env": dict(os.environ),
+            "build": maintenance.build_live_snapshot,
+            "merge": maintenance.merge_pull,
+            "profile": maintenance.load_profile,
+        }
+        calls = []
+        sequence = list(snapshots)
+
+        def fake_build(_event, _token, _profile):
+            return sequence.pop(0)
+
+        def fake_merge(*args, **kwargs):
+            calls.append(args)
+            return maintenance.Decision("merged", "ok")
+
+        os.environ["GITHUB_TOKEN"] = "t"
+        os.environ["GITHUB_EVENT_PATH"] = str(event)
+        maintenance.build_live_snapshot = fake_build
+        maintenance.merge_pull = fake_merge
+        maintenance.load_profile = lambda _p=None: {}
+        try:
+            args = argparse.Namespace(profile=None, apply_live=True)
+            code = maintenance.cmd_apply_live(args)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved["env"])
+            maintenance.build_live_snapshot = saved["build"]
+            maintenance.merge_pull = saved["merge"]
+            maintenance.load_profile = saved["profile"]
+        return code, calls
+
+    @staticmethod
+    def _decision(action, reason):
+        return maintenance.Decision(action, reason)
+
+    def test_a_hold_landing_on_the_same_sha_blocks_the_merge(self):
+        # Regression: one snapshot was built and merged straight away, so a hold
+        # label or new CHANGES_REQUESTED arriving on the same head was invisible.
+        green = _snapshot()
+        held = _snapshot(pull_request=_pr(labels=[{"name": "hold"}]))
+        with tempfile.TemporaryDirectory() as tmp:
+            code, calls = self._run([green, held], Path(tmp))
+        self.assertEqual(calls, [], "merge must not be attempted after a failed refresh")
+        self.assertEqual(code, 0)
+
+    def test_a_failed_check_on_refresh_blocks_the_merge(self):
+        green = _snapshot()
+        failing = _snapshot(checks=[{
+            "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+            "conclusion": "failure", "app": {"slug": "github-actions"},
+        }])
+        with tempfile.TemporaryDirectory() as tmp:
+            code, calls = self._run([green, failing], Path(tmp))
+        self.assertEqual(calls, [])
+
+    def test_unavailable_evidence_at_the_boundary_defers(self):
+        green = _snapshot()
+        with tempfile.TemporaryDirectory() as tmp:
+            code, calls = self._run(
+                [green, maintenance.Decision("fail", "reviews-api:500")], Path(tmp)
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(code, 0)
+
+    def test_a_head_change_during_refresh_is_not_merged(self):
+        green = _snapshot()
+        moved = _snapshot(head_sha=SHA2, pull_request=_pr(sha=SHA2))
+        with tempfile.TemporaryDirectory() as tmp:
+            code, calls = self._run([green, moved], Path(tmp))
+        self.assertEqual(calls, [])
+
+    def test_two_consistent_green_snapshots_still_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, calls = self._run([_snapshot(), _snapshot()], Path(tmp))
+        self.assertEqual(len(calls), 1, "a genuinely green PR must still merge")
+        self.assertEqual(code, 0)
 
 
 class LiveAdapterEvidenceTests(unittest.TestCase):

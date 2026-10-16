@@ -438,13 +438,23 @@ def classify_checks(
         if not isinstance(run, dict):
             return {"state": "failed", "reason": "malformed-check"}
         name = str(run.get("name") or "")
+        mandatory = name in expected
         sha = str(run.get("head_sha") or run.get("sha") or "")
-        if sha and sha != head_sha:
+        if sha != head_sha:
+            # A check with no head_sha at all cannot be shown to belong to this
+            # head. For a mandatory gate that is missing evidence, not a pass.
+            if mandatory:
+                return {"state": "failed", "reason": f"missing-check-head-sha:{name}"}
             continue
         app = run.get("app") if isinstance(run.get("app"), dict) else {}
         slug = str(app.get("slug") or app.get("name") or run.get("app_slug") or "")
-        if trusted_apps and slug and slug not in trusted_apps and name in expected:
-            return {"state": "failed", "reason": f"untrusted-app:{name}:{slug}"}
+        if mandatory and trusted_apps:
+            if not slug:
+                # An unnamed producer is not an authenticated one; a familiar
+                # check name alone is not evidence of who ran it.
+                return {"state": "failed", "reason": f"missing-check-app:{name}"}
+            if slug not in trusted_apps:
+                return {"state": "failed", "reason": f"untrusted-app:{name}:{slug}"}
         previous = latest.get(name)
         if previous is None:
             latest[name] = run
@@ -1052,6 +1062,10 @@ _REQ_VCS_RE = re.compile(r"(?i)\b(?:git|hg|svn|bzr)\+")
 _REQ_DIRECT_URL_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*@\s*\S+")
 _REQ_MARKER_RE = re.compile(r";\s*[A-Za-z_][A-Za-z0-9_]*\s*(?:<|>|=|!|~)")
 _REQ_VERSION_LINE_RE = re.compile(r"^([-+])([A-Za-z0-9_.-]+)==([0-9A-Za-z.]+)")
+# Same shape, but also matches an unchanged context line so a following hash line
+# can be attributed to the package it actually belongs to.
+_REQ_VERSION_ANY_RE = re.compile(r"^([-+ ])([A-Za-z0-9_.-]+)==([0-9A-Za-z.]+)")
+_REQ_HASH_LINE_RE = re.compile(r"^\s*--hash=")
 _REQ_BENIGN_RE = re.compile(r"^\s*(?:--hash=|#|$)")
 
 
@@ -1085,12 +1099,23 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
     order: list[str] = []
     saw_change = False
     unsafe: list[str] = []
+    hash_changed: set[str] = set()
+    current_pkg: str | None = None
     for line in patch.splitlines():
         if line.startswith(("---", "+++")) or line.startswith("@@"):
             continue
+        # Track the package a hash line belongs to. Context lines matter here: in
+        # a lock diff the `idna==3.20 \` line is unchanged while the hashes under
+        # it are swapped, so only a context-aware walk can attribute them.
+        owner = _REQ_VERSION_ANY_RE.match(line)
+        if owner:
+            current_pkg = owner.group(2).lower()
+        elif _REQ_HASH_LINE_RE.match(line[1:] if line[:1] in "+-" else line):
+            if line[:1] in ("+", "-") and current_pkg:
+                hash_changed.add(current_pkg)
         match = _REQ_VERSION_LINE_RE.match(line)
         if not match:
-            if line[:1] in ("+", "-"):
+            if line[:1] in ("+", "-") and not _REQ_HASH_LINE_RE.match(line[1:]):
                 saw_change = True
                 reason = _unsafe_requirements_line(line[1:])
                 if reason and reason not in unsafe:
@@ -1120,6 +1145,13 @@ def _classify_requirements_patch(patch: str, filename: str) -> list[dict[str, An
         return [{"risk": "review-required", "auto_eligible": False,
                  "reason": unsafe[0], "name": filename,
                  "reasons": unsafe}]
+    # A hash that changed for a package whose version did NOT change is not lock
+    # regeneration - it is a different artifact being pinned under the same name.
+    for pkg in sorted(hash_changed):
+        if removed.get(pkg) == added.get(pkg):
+            return [{"risk": "review-required", "auto_eligible": False,
+                     "reason": "hash-mutation-without-version-change",
+                     "name": pkg, "file": filename}]
     out: list[dict[str, Any]] = []
     for pkg in order:
         old, new = removed.get(pkg), added.get(pkg)
@@ -1223,8 +1255,32 @@ def cmd_apply_live(args: argparse.Namespace) -> int:
         owner, name = repo.split("/", 1)
         number = int(built["pull_request"]["number"])
         fallbacks = list(profile.get("fallback_merge_methods") or ["merge"])
+
+        # SHA binding alone does not protect this decision. A hold label, a new
+        # CHANGES_REQUESTED or a failed check can all land on the SAME head after
+        # the first snapshot was taken, and every one of them would still see a
+        # matching SHA. Re-read the whole world and re-decide at the boundary.
+        refreshed = build_live_snapshot(event, token, profile)
+        if isinstance(refreshed, Decision):
+            # Unavailable evidence at the merge boundary is not a pass.
+            refreshed = Decision(
+                "defer", f"pre-merge-refresh-unavailable:{refreshed.reason}", risk="blocked"
+            )
+            json.dump(refreshed.to_json(), sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+        if str(refreshed["head_sha"]) != str(built["head_sha"]):
+            stale = Decision("defer", "head-changed-during-refresh", risk="blocked")
+            json.dump(stale.to_json(), sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+        decision = decide_merge(refreshed)
+        if decision.action != "merge":
+            json.dump(decision.to_json(), sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0 if decision.action in {"defer", "review-required"} else 1
         decision = merge_pull(
-            owner, name, number, str(built["head_sha"]),
+            owner, name, number, str(refreshed["head_sha"]),
             str(decision.merge_method or "squash"), token, fallbacks,
         )
         # Re-read to confirm rather than trusting a false merged flag.
