@@ -19,6 +19,16 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import maintenance  # noqa: E402
+import maintenance_common  # noqa: E402
+
+
+def _get_json(url):
+    """Adapter-shaped getter: the common module owns no token or client."""
+    return maintenance._github_json(url, "token")
+
+
+def _get_pages(url):
+    return maintenance._api_pages(url, "token")
 import python_version_bump  # noqa: E402
 
 SHA = "a" * 40
@@ -156,7 +166,7 @@ class VersionAndSelectTests(unittest.TestCase):
         }]
         result = maintenance.select_python_candidate(
             current, manifest, soak_days=30,
-            now=maintenance.parse_iso_date("2026-03-01T00:00:00Z"),
+            now=maintenance_common.parse_iso_date("2026-03-01T00:00:00Z"),
         )
         self.assertEqual(result["status"], "review-required")
         self.assertEqual(result["kind"], "minor")
@@ -172,7 +182,7 @@ class VersionAndSelectTests(unittest.TestCase):
         }]
         result = maintenance.select_python_candidate(
             current, manifest, soak_days=30,
-            now=maintenance.parse_iso_date("2026-09-25T00:00:00Z"),
+            now=maintenance_common.parse_iso_date("2026-09-25T00:00:00Z"),
         )
         self.assertEqual(result["status"], "deferred")
         self.assertIn("soak", result["reason"])
@@ -1233,7 +1243,7 @@ class CheckProducerBindingTests(unittest.TestCase):
     _UNSET = object()
 
     def _verify(self, evidence, producers=_UNSET, expected=("application",)):
-        return maintenance.verify_check_producers(
+        return maintenance_common.verify_check_producers(
             evidence,
             expected_names=list(expected),
             head_sha=SHA,
@@ -1272,14 +1282,14 @@ class CheckProducerBindingTests(unittest.TestCase):
     def test_details_url_from_another_repository_is_not_an_identity(self):
         foreign = "https://github.com/evil/other/actions/runs/1/job/2"
         self.assertIsNone(
-            maintenance.parse_check_run_identity(foreign, "uesu/News-Express")
+            maintenance_common.parse_check_run_identity(foreign, "uesu/News-Express")
         )
 
     def test_unparseable_details_url_is_not_an_identity(self):
         for url in ("", "https://example.com/runs/1/job/2", "not a url"):
             with self.subTest(url=url):
                 self.assertIsNone(
-                    maintenance.parse_check_run_identity(url, "uesu/News-Express")
+                    maintenance_common.parse_check_run_identity(url, "uesu/News-Express")
                 )
 
     def test_a_same_named_check_from_a_foreign_workflow_blocks_the_merge(self):
@@ -1302,7 +1312,7 @@ class SecurityEvidenceTests(unittest.TestCase):
     """Scan outcomes are separate evidence; unavailable is not clean."""
 
     def test_open_findings_block(self):
-        result = maintenance.verify_security_evidence(
+        result = maintenance_common.verify_security_evidence(
             {"code-scanning": {"state": "ok", "open": 3}}, ["code-scanning"]
         )
         self.assertEqual(result["state"], "failed")
@@ -1311,19 +1321,19 @@ class SecurityEvidenceTests(unittest.TestCase):
     def test_unavailable_evidence_defers_rather_than_passing(self):
         for state in ("unavailable", "not-enabled", "malformed", "unknown-kind"):
             with self.subTest(state=state):
-                result = maintenance.verify_security_evidence(
+                result = maintenance_common.verify_security_evidence(
                     {"code-scanning": {"state": state}}, ["code-scanning"]
                 )
                 self.assertEqual(result["state"], "defer", state)
                 self.assertNotEqual(result["state"], "ready")
 
     def test_evidence_never_collected_defers(self):
-        result = maintenance.verify_security_evidence({}, ["secret-scanning"])
+        result = maintenance_common.verify_security_evidence({}, ["secret-scanning"])
         self.assertEqual(result["state"], "defer")
         self.assertEqual(result["reason"], "security-evidence-missing:secret-scanning")
 
     def test_clean_scans_are_ready(self):
-        result = maintenance.verify_security_evidence(
+        result = maintenance_common.verify_security_evidence(
             {"code-scanning": {"state": "ok", "open": 0}}, ["code-scanning"]
         )
         self.assertEqual(result["state"], "ready")
@@ -1476,8 +1486,8 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         original = maintenance._github_json
         maintenance._github_json = responder
         try:
-            return maintenance.collect_security_evidence(
-                "o", "r", SHA, "token", list(required),
+            return maintenance_common.collect_security_evidence(
+                "o", "r", SHA, list(required), _get_pages,
                 ref=self.REF if ref is None else ref,
             )
         finally:
@@ -1507,7 +1517,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
                          "the count must reflect alerts, not the analysis record")
         self.assertEqual(result["code-scanning"].get("analyses"), 1)
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"],
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"],
             "failed",
         )
 
@@ -1519,7 +1529,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         )
         self.assertEqual(result["code-scanning"]["state"], "malformed")
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
         )
 
     def test_open_alerts_from_the_alerts_endpoint_block(self):
@@ -1529,7 +1539,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert]))
         self.assertEqual(result["code-scanning"]["state"], "ok")
         self.assertEqual(result["code-scanning"]["open"], 1)
-        verdict = maintenance.verify_security_evidence(result, ["code-scanning"])
+        verdict = maintenance_common.verify_security_evidence(result, ["code-scanning"])
         self.assertEqual(verdict["state"], "failed")
         self.assertEqual(verdict["reason"], "unresolved-code-scanning-alerts:1")
 
@@ -1539,14 +1549,14 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert]))
         self.assertEqual(result["code-scanning"]["open"], 0)
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "ready"
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"], "ready"
         )
 
     def test_no_scan_on_this_head_is_unavailable_not_clean(self):
         result = self._collect(self._responder(analyses=[], alerts=[]))
         self.assertEqual(result["code-scanning"]["state"], "no-analysis-for-head")
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
         )
 
     def test_a_stale_only_analysis_list_is_unavailable(self):
@@ -1560,7 +1570,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         result = self._collect(self._responder(analyses=[errored], alerts=[]))
         self.assertEqual(result["code-scanning"]["state"], "analysis-error")
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
         )
 
     def test_a_denied_scan_api_is_unavailable_not_clean(self):
@@ -1569,14 +1579,14 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         )
         self.assertEqual(result["code-scanning"]["state"], "unavailable")
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
         )
 
     def test_a_malformed_alert_page_is_not_clean(self):
         result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[{"n": 1}]))
         self.assertEqual(result["code-scanning"]["state"], "malformed")
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
+            maintenance_common.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
         )
 
     def test_an_absent_or_unknown_alert_state_is_never_read_as_resolved(self):
@@ -1602,7 +1612,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
                 )
                 self.assertEqual(result["code-scanning"]["state"], "malformed", label)
                 self.assertEqual(
-                    maintenance.verify_security_evidence(
+                    maintenance_common.verify_security_evidence(
                         result, ["code-scanning"], mode="required"
                     )["state"],
                     "defer",
@@ -1619,8 +1629,8 @@ class ScanEvidenceShapeTests(unittest.TestCase):
 
         maintenance._github_json = responder
         try:
-            result = maintenance.collect_security_evidence(
-                "o", "r", SHA, "token", ["secret-scanning"]
+            result = maintenance_common.collect_security_evidence(
+                "o", "r", SHA, ["secret-scanning"], _get_pages
             )
         finally:
             maintenance._github_json = original
@@ -1634,7 +1644,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         )
         self.assertEqual(result["code-scanning"]["state"], "missing-ref-scope")
         self.assertEqual(
-            maintenance.verify_security_evidence(
+            maintenance_common.verify_security_evidence(
                 result, ["code-scanning"], mode="required"
             )["state"],
             "defer",
@@ -1654,8 +1664,8 @@ class ScanEvidenceShapeTests(unittest.TestCase):
 
         maintenance._github_json = responder
         try:
-            maintenance.collect_security_evidence(
-                "o", "r", SHA, "token", ["code-scanning"], ref="feature/x y"
+            maintenance_common.collect_security_evidence(
+                "o", "r", SHA, ["code-scanning"], _get_pages, ref="feature/x y"
             )
         finally:
             maintenance._github_json = original
@@ -1671,14 +1681,14 @@ class ScanEvidenceShapeTests(unittest.TestCase):
 
         maintenance._github_json = responder
         try:
-            result = maintenance.collect_security_evidence(
-                "o", "r", SHA, "token", ["secret-scanning"]
+            result = maintenance_common.collect_security_evidence(
+                "o", "r", SHA, ["secret-scanning"], _get_pages
             )
         finally:
             maintenance._github_json = original
         self.assertEqual(result["secret-scanning"], {"state": "ok", "open": 1})
         self.assertEqual(
-            maintenance.verify_security_evidence(result, ["secret-scanning"])["state"], "failed"
+            maintenance_common.verify_security_evidence(result, ["secret-scanning"])["state"], "failed"
         )
 
 
@@ -1686,13 +1696,13 @@ class SecurityPolicyModeTests(unittest.TestCase):
     """An empty requirement list is not the same statement as no requirement."""
 
     def test_naming_kinds_means_required(self):
-        mode, kinds = maintenance.security_policy(
+        mode, kinds = maintenance_common.security_policy(
             {"security_evidence": {"mode": "required", "required": ["code-scanning"]}}
         )
         self.assertEqual((mode, kinds), ("required", ["code-scanning"]))
 
     def test_an_explicit_disable_is_honoured_and_reported(self):
-        verdict = maintenance.verify_security_evidence(
+        verdict = maintenance_common.verify_security_evidence(
             {}, [], mode="disabled"
         )
         self.assertEqual(verdict["state"], "ready")
@@ -1703,15 +1713,15 @@ class SecurityPolicyModeTests(unittest.TestCase):
         # that never configured the requirement looked identical to a clean one.
         for mode in ("", "required", "unconfigured"):
             with self.subTest(mode=mode):
-                verdict = maintenance.verify_security_evidence({}, [], mode=mode)
+                verdict = maintenance_common.verify_security_evidence({}, [], mode=mode)
                 self.assertEqual(verdict["state"], "failed", mode)
                 self.assertEqual(verdict["reason"], "security-evidence-unconfigured")
 
     def test_absent_policy_is_unconfigured(self):
-        self.assertEqual(maintenance.security_policy({})[0], "unconfigured")
+        self.assertEqual(maintenance_common.security_policy({})[0], "unconfigured")
 
     def test_legacy_flat_list_still_means_required(self):
-        mode, kinds = maintenance.security_policy(
+        mode, kinds = maintenance_common.security_policy(
             {"required_security_evidence": ["secret-scanning"]}
         )
         self.assertEqual((mode, kinds), ("required", ["secret-scanning"]))
@@ -1737,7 +1747,7 @@ class ProducerOutcomeTests(unittest.TestCase):
     }
 
     def _verify(self, **overrides):
-        return maintenance.verify_check_producers(
+        return maintenance_common.verify_check_producers(
             {"application": _producer(**overrides)},
             expected_names=["application"],
             head_sha=SHA,
@@ -1901,7 +1911,7 @@ class ProductionSecurityPolicyTests(unittest.TestCase):
         # Regression: an empty requirement list used to satisfy the gate, so a
         # repository that never configured the requirement looked identical to a
         # clean one. The shipped policy has to say which of the two it is.
-        mode, kinds = maintenance.security_policy(self._policy())
+        mode, kinds = maintenance_common.security_policy(self._policy())
         self.assertIn(mode, ("disabled", "required"))
         self.assertNotEqual(mode, "unconfigured")
         if mode == "disabled":
@@ -1916,21 +1926,21 @@ class ProductionSecurityPolicyTests(unittest.TestCase):
         block = dict(policy["security_evidence"])
         block["mode"] = "required"
         block["required"] = list(block.get("candidates") or ["code-scanning"])[:1]
-        mode, kinds = maintenance.security_policy({"security_evidence": block})
+        mode, kinds = maintenance_common.security_policy({"security_evidence": block})
         self.assertEqual(mode, "required")
         self.assertEqual(len(kinds), 1)
         # With no evidence collected, the gate must defer rather than pass.
-        verdict = maintenance.verify_security_evidence({}, kinds, mode=mode)
+        verdict = maintenance_common.verify_security_evidence({}, kinds, mode=mode)
         self.assertEqual(verdict["state"], "defer")
         self.assertIn("security-evidence-missing", verdict["reason"])
 
     def test_omitting_the_block_entirely_fails_closed(self):
         stripped = {k: v for k, v in self._policy().items() if k != "security_evidence"}
         stripped.pop("required_security_evidence", None)
-        mode, _ = maintenance.security_policy(stripped)
+        mode, _ = maintenance_common.security_policy(stripped)
         self.assertEqual(mode, "unconfigured")
         self.assertEqual(
-            maintenance.verify_security_evidence({}, [], mode=mode)["state"], "failed"
+            maintenance_common.verify_security_evidence({}, [], mode=mode)["state"], "failed"
         )
 
 
@@ -1942,7 +1952,7 @@ class CheckRunLinkTests(unittest.TestCase):
     }
 
     def _verify(self, **overrides):
-        return maintenance.verify_check_producers(
+        return maintenance_common.verify_check_producers(
             {"application": _producer(**overrides)},
             expected_names=["application"],
             head_sha=SHA,
@@ -2318,6 +2328,183 @@ class LiveCollectorSecurityEvidenceTests(unittest.TestCase):
         decision = self._decide({"mode": "required", "required": []})
         self.assertEqual(decision.action, "fail")
         self.assertEqual(decision.reason, "security-evidence-unconfigured")
+
+class CommonHelperGuardTests(unittest.TestCase):
+    """Guards that arrive with the shared module must actually fire.
+
+    Adopting maintenance_common.py is only meaningful if the stricter checks it
+    carries are reachable from this repository's callers, and if the ones it
+    tightens are pinned so a later sync cannot quietly loosen them.
+    """
+
+    def test_a_blank_head_sha_blocks_producer_verification(self):
+        result = maintenance_common.verify_check_producers(
+            {"application": _producer()},
+            expected_names=["application"],
+            head_sha="",
+            producers={"application": {"workflow": ".github/workflows/ci.yml", "job": "application"}},
+            repository=REPO,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["reason"], "missing-head-sha")
+
+    def test_a_malformed_open_count_defers_instead_of_passing(self):
+        result = maintenance_common.verify_security_evidence(
+            {"code-scanning": {"state": "ok", "open": "not-a-number"}},
+            ["code-scanning"],
+            mode="required",
+        )
+        self.assertEqual(result["state"], "defer")
+        self.assertEqual(result["reason"], "security-evidence-unavailable:code-scanning:malformed-open")
+
+    def test_a_flat_kind_list_is_not_an_implicit_mode(self):
+        # Naming kinds in a bare list used to be read as "required". The shared
+        # module insists on the explicit block form, so a bare list is now a
+        # recorded configuration gap rather than a silently satisfied gate.
+        mode, required = maintenance_common.security_policy(
+            {"security_evidence": ["code-scanning"]}
+        )
+        self.assertEqual(mode, "unconfigured")
+        self.assertEqual(required, [])
+        verdict = maintenance_common.verify_security_evidence({}, [], mode=mode)
+        self.assertEqual(verdict["state"], "failed")
+        self.assertEqual(verdict["reason"], "security-evidence-unconfigured")
+
+    def test_dependabot_proposals_are_not_publication_bound(self):
+        result = maintenance_common.verify_publication_gate(
+            mode="", kind="dependabot", evidence={}, pr=_pr()
+        )
+        self.assertEqual(result["state"], "ready")
+        self.assertEqual(result["reason"], "publication-not-applicable")
+
+    def test_a_python_bump_with_no_mode_is_a_configuration_gap(self):
+        result = maintenance_common.verify_publication_gate(
+            mode="", kind="python_bump", evidence={}, pr=_pr(), candidate_version="3.14.9"
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["reason"], "publication-evidence-unconfigured")
+
+    def test_a_disabled_publication_lane_blocks_rather_than_passing(self):
+        result = maintenance_common.verify_publication_gate(
+            mode="disabled", kind="python_bump", evidence={}, pr=_pr(), candidate_version="3.14.9"
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["reason"], "publication-lane-blocked")
+
+    def test_a_required_lane_without_records_does_not_merge(self):
+        result = maintenance_common.verify_publication_gate(
+            mode="required", kind="python_bump", evidence={}, pr=_pr(), candidate_version="3.14.9"
+        )
+        self.assertNotEqual(result["state"], "ready")
+
+    def test_the_shipped_profile_records_the_publication_decision(self):
+        policy = maintenance.load_profile()
+        mode, path, files = maintenance_common.publication_policy(policy)
+        self.assertEqual(mode, "disabled")
+        self.assertEqual(path, ".github/workflows/python_version_bump.yml")
+        self.assertEqual(files, (".python-version",))
+        self.assertIn("deliberate", policy["publication_evidence"]["note"])
+
+    def test_the_shipped_profile_still_declares_security_explicitly(self):
+        policy = maintenance.load_profile()
+        mode, required = maintenance_common.security_policy(policy)
+        self.assertEqual(mode, "disabled")
+        self.assertEqual(required, [])
+
+
+class LivePublicationLaneTests(unittest.TestCase):
+    """A python-bump proposal through the real collector and decision."""
+
+    parent = LiveCollectorMissingEvidenceTests
+    PR_REF = "chore/python-3.14.9"
+    FILES = [{"filename": ".python-version", "patch": "-3.14.8\n+3.14.9\n"}]
+
+    def _profile(self, **over):
+        base = dict(self.parent.PROFILE)
+        base["updater_identities"] = {
+            "python_bump": {
+                "login": "github-actions[bot]",
+                "auto_merge_var": "AUTO_MERGE_PYTHON_BUMP",
+                "branch_prefix": "chore/python-",
+                "allowed_files": [".python-version"],
+            },
+        }
+        base["publication_evidence"] = {"mode": "disabled"}
+        base.update(over)
+        return base
+
+    def _live(self, profile, *, files=None, supplied=None):
+        harness = self.parent()
+        original = maintenance._github_json
+        maintenance._github_json = harness._responder()
+        try:
+            snapshot = maintenance.build_live_snapshot(
+                harness.EVENT, "token", profile
+            )
+        finally:
+            maintenance._github_json = original
+        self.assertIsInstance(snapshot, dict)
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(
+            login="github-actions[bot]", sha=SHA, ref=self.PR_REF,
+            head_repo="acme/app", base_repo="acme/app",
+        )
+        snapshot["files"] = self.FILES if files is None else files
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "python-patch"}
+        snapshot["variables"] = {"AUTO_MERGE_PYTHON_BUMP": "yes"}
+        if supplied is not None:
+            snapshot["candidate_version"] = supplied
+        return maintenance.decide_merge(snapshot)
+
+    def test_a_disabled_lane_blocks_the_python_bump_decision(self):
+        decision = self._live(self._profile())
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "publication-lane-blocked")
+
+    def test_an_unconfigured_lane_blocks_the_python_bump_decision(self):
+        profile = self._profile()
+        profile["publication_evidence"] = {}
+        decision = self._live(profile)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "publication-evidence-unconfigured")
+
+    def test_a_python_bump_diff_that_names_no_version_is_rejected(self):
+        decision = self._live(
+            self._profile(),
+            files=[{"filename": ".python-version", "patch": "-\n+\n"}],
+        )
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "candidate-version-unparsed")
+
+    def test_a_supplied_candidate_that_disagrees_with_the_diff_is_rejected(self):
+        decision = self._live(self._profile(), supplied="3.13.0")
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "candidate-version-mismatch")
+
+    def test_a_collection_error_is_reported_not_swallowed(self):
+        harness = self.parent()
+        original = maintenance._github_json
+        maintenance._github_json = harness._responder()
+        try:
+            snapshot = maintenance.build_live_snapshot(
+                harness.EVENT, "token", self._profile(publication_evidence={"mode": "required"})
+            )
+        finally:
+            maintenance._github_json = original
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(
+            login="github-actions[bot]", sha=SHA, ref=self.PR_REF,
+            head_repo="acme/app", base_repo="acme/app",
+        )
+        snapshot["files"] = self.FILES
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "python-patch"}
+        snapshot["variables"] = {"AUTO_MERGE_PYTHON_BUMP": "yes"}
+        snapshot["publication_evidence"] = {"error": "publication-collection-failed"}
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "publication-collection-failed")
 
 
 if __name__ == "__main__":

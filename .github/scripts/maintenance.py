@@ -18,12 +18,13 @@ import os
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+import maintenance_common
 
 SCHEMA_VERSION = 1
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -129,23 +130,6 @@ def version_kind(current: Version, candidate: Version) -> str:
     if candidate.minor != current.minor:
         return "minor"
     return "patch"
-
-
-def parse_iso_date(raw: str | None) -> datetime | None:
-    if not raw:
-        return None
-    text = raw.strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        value = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _linux_x64(entry: Mapping[str, Any]) -> bool:
@@ -285,7 +269,7 @@ def select_python_candidate(
             "auto_eligible": False,
         }
 
-    published = parse_iso_date(
+    published = maintenance_common.parse_iso_date(
         str(minor[1].get("release_date") or minor[1].get("published_at") or "")
     )
     if published is None:
@@ -518,409 +502,6 @@ WORKFLOW_RUN_HINT = re.compile(r"^\s+run:\s*", re.M)
 # check's own run and job identifiers. Unresolved, unavailable or mismatched
 # evidence blocks; nothing is inferred from the name.
 
-_CHECK_RUN_URL_RE = re.compile(
-    r"^https://github\.com/([^/\s]+)/([^/\s]+)/actions/runs/(\d+)/job/(\d+)/?$"
-)
-
-
-def parse_check_run_identity(details_url: Any, expected_repository: str) -> tuple[int, int] | None:
-    """Return (run_id, job_id) only for a run belonging to the expected repository."""
-    match = _CHECK_RUN_URL_RE.match(str(details_url or "").strip())
-    if not match:
-        return None
-    owner, repo, run_id, job_id = match.groups()
-    if f"{owner}/{repo}" != str(expected_repository or ""):
-        return None
-    return int(run_id), int(job_id)
-
-
-def collect_producer_evidence(
-    owner: str,
-    name: str,
-    check_runs: Sequence[Mapping[str, Any]],
-    expected_names: Sequence[str],
-    token: str,
-) -> dict[str, Any]:
-    """Resolve each mandatory check to the workflow run and job that produced it.
-
-    Every field the verifier needs for identity is recorded here: the check run's
-    own id, the job and run identifiers from the resolved URL, the attempt each
-    side reports, and the completion state of both.
-    """
-    expected = {n for n in expected_names if n}
-    evidence: dict[str, Any] = {}
-    for run in check_runs or []:
-        if not isinstance(run, dict):
-            continue
-        check_name = str(run.get("name") or "")
-        if check_name not in expected or check_name in evidence:
-            continue
-        identity = parse_check_run_identity(
-            run.get("details_url") or run.get("html_url"), f"{owner}/{name}"
-        )
-        if identity is None:
-            evidence[check_name] = {"error": "unresolvable-details-url"}
-            continue
-        run_id, job_id = identity
-        status, job = _github_json(
-            f"https://api.github.com/repos/{owner}/{name}/actions/jobs/{job_id}", token
-        )
-        if status != 200 or not isinstance(job, dict):
-            evidence[check_name] = {"error": f"job-api:{status}"}
-            continue
-        status, wf_run = _github_json(
-            f"https://api.github.com/repos/{owner}/{name}/actions/runs/{run_id}", token
-        )
-        if status != 200 or not isinstance(wf_run, dict):
-            evidence[check_name] = {"error": f"run-api:{status}"}
-            continue
-        evidence[check_name] = {
-            "workflow": str(wf_run.get("path") or ""),
-            "job": str(job.get("name") or ""),
-            "check_run_id": _as_positive_int(run.get("id")),
-            "run_id": run_id,
-            "run_record_id": _as_positive_int(wf_run.get("id")),
-            "job_id": job_id,
-            "job_record_id": _as_positive_int(job.get("id")),
-            "job_run_id": _as_positive_int(job.get("run_id")),
-            "job_check_run_url": str(job.get("check_run_url") or ""),
-            "run_attempt": _as_positive_int(wf_run.get("run_attempt")),
-            "job_run_attempt": _as_positive_int(job.get("run_attempt")),
-            "head_sha": str(wf_run.get("head_sha") or ""),
-            "job_head_sha": str(job.get("head_sha") or ""),
-            "job_status": str(job.get("status") or ""),
-            "job_conclusion": str(job.get("conclusion") or ""),
-            "run_status": str(wf_run.get("status") or ""),
-            "run_conclusion": str(wf_run.get("conclusion") or ""),
-        }
-    return evidence
-
-
-def _as_positive_int(value: Any) -> int | None:
-    """Return a positive int, or None when the value is absent or not one."""
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number > 0 else None
-
-
-def verify_check_producers(
-    evidence: Mapping[str, Any] | None,
-    *,
-    expected_names: Sequence[str],
-    head_sha: str,
-    producers: Mapping[str, Any] | None,
-    repository: str = "",
-) -> dict[str, Any]:
-    """Pure producer binding. Every gap blocks; nothing is inferred from a name.
-
-    Matching workflow, job and head are not enough. The job has to be the one the
-    check run pointed at, it has to belong to the run that was fetched, both have
-    to describe the same attempt, and both have to have completed successfully. A
-    separately green same-named check does not compensate for a failed producer.
-    """
-    if not producers:
-        return {"state": "failed", "reason": "no-approved-producers-configured"}
-    for check_name in expected_names:
-        approved = producers.get(check_name)
-        if not isinstance(approved, dict):
-            return {"state": "failed", "reason": f"no-approved-producer:{check_name}"}
-        found = (evidence or {}).get(check_name)
-        if not isinstance(found, dict):
-            return {"state": "failed", "reason": f"missing-producer-evidence:{check_name}"}
-        if found.get("error"):
-            return {
-                "state": "failed",
-                "reason": f"producer-evidence-unavailable:{check_name}:{found['error']}",
-            }
-
-        failure = _producer_identity_failure(check_name, found) or _producer_check_link_failure(
-            check_name, found, repository
-        )
-        if failure:
-            return {"state": "failed", "reason": failure}
-
-        if str(found.get("workflow") or "") != str(approved.get("workflow") or ""):
-            return {"state": "failed", "reason": f"unapproved-producer-workflow:{check_name}"}
-        if str(found.get("job") or "") != str(approved.get("job") or ""):
-            return {"state": "failed", "reason": f"unapproved-producer-job:{check_name}"}
-        if str(found.get("head_sha") or "") != str(head_sha):
-            return {"state": "failed", "reason": f"producer-head-mismatch:{check_name}"}
-        if str(found.get("job_head_sha") or "") != str(head_sha):
-            return {"state": "failed", "reason": f"producer-job-head-mismatch:{check_name}"}
-
-        outcome = _producer_outcome_failure(check_name, found)
-        if outcome:
-            return {"state": "failed", "reason": outcome}
-    return {"state": "ready", "reason": "producers-verified"}
-
-
-def _producer_identity_failure(check_name: str, found: Mapping[str, Any]) -> str:
-    """Reject evidence whose identifiers do not tie the check to the job and run."""
-    run_id = found.get("run_id")
-    job_id = found.get("job_id")
-    if not isinstance(run_id, int) or run_id <= 0:
-        return f"producer-missing-run-id:{check_name}"
-    if not isinstance(job_id, int) or job_id <= 0:
-        return f"producer-missing-job-id:{check_name}"
-    # The check run's details_url named this job; the fetched job must be it.
-    if found.get("job_record_id") != job_id:
-        return f"producer-job-id-mismatch:{check_name}"
-    # The job must belong to the run that was fetched, not merely share a name.
-    if found.get("job_run_id") != run_id:
-        return f"producer-run-id-mismatch:{check_name}"
-    # And the run that was fetched must be the run that was asked for.
-    if found.get("run_record_id") != run_id:
-        return f"producer-run-record-mismatch:{check_name}"
-    run_attempt = found.get("run_attempt")
-    if not isinstance(run_attempt, int) or run_attempt <= 0:
-        return f"producer-missing-run-attempt:{check_name}"
-    # A job from an earlier attempt is stale evidence for this run.
-    if found.get("job_run_attempt") != run_attempt:
-        return f"producer-attempt-mismatch:{check_name}"
-    return ""
-
-
-_CHECK_RUN_API_RE = re.compile(
-    r"^https://api\.github\.com/repos/([^/\s]+)/([^/\s]+)/check-runs/(\d+)/?$"
-)
-
-
-def _producer_check_link_failure(
-    check_name: str, found: Mapping[str, Any], repository: str
-) -> str:
-    """Bind the fetched job to the exact check run being authenticated.
-
-    The job was located through the check run's details_url, so the job's own
-    canonical check-run reference has to point back at that same check in the same
-    repository. Without this, a successful job reached through one check's URL can
-    stand in for a different check that never ran.
-    """
-    check_run_id = found.get("check_run_id")
-    if not isinstance(check_run_id, int) or check_run_id <= 0:
-        return f"producer-missing-check-run-id:{check_name}"
-    url = str(found.get("job_check_run_url") or "").strip()
-    match = _CHECK_RUN_API_RE.match(url)
-    if not match:
-        return f"producer-missing-check-run-url:{check_name}"
-    owner, repo, linked_id = match.groups()
-    if repository and f"{owner}/{repo}" != repository:
-        return f"producer-check-run-foreign-repository:{check_name}"
-    if int(linked_id) != check_run_id:
-        return f"producer-check-run-id-mismatch:{check_name}"
-    return ""
-
-
-def _producer_outcome_failure(check_name: str, found: Mapping[str, Any]) -> str:
-    """Require a successful completed job and run, not just a familiar identity."""
-    if str(found.get("job_status") or "") != "completed":
-        return f"producer-job-not-completed:{check_name}:{found.get('job_status') or 'unknown'}"
-    if str(found.get("job_conclusion") or "") != "success":
-        return f"producer-job-not-successful:{check_name}:{found.get('job_conclusion') or 'unknown'}"
-    if str(found.get("run_status") or "") != "completed":
-        return f"producer-run-not-completed:{check_name}:{found.get('run_status') or 'unknown'}"
-    if str(found.get("run_conclusion") or "") != "success":
-        return f"producer-run-not-successful:{check_name}:{found.get('run_conclusion') or 'unknown'}"
-    return ""
-
-
-# Security evidence is retrieved rather than assumed, and the two GitHub APIs are
-# not interchangeable. `code-scanning/analyses` describes scan *executions* and
-# carries results_count; it has no open/resolved state. Only
-# `code-scanning/alerts` describes findings. Counting an alert-only field on an
-# analysis record silently yields zero, so the analyses list is used to prove a
-# scan completed on this head, and the alerts list to establish the findings.
-
-_CODE_SCAN_ANALYSES = "code-scanning/analyses"
-_CODE_SCAN_ALERTS = "code-scanning/alerts"
-_SECRET_SCAN_ALERTS = "secret-scanning/alerts"
-
-
-def security_policy(source: Mapping[str, Any] | None) -> tuple[str, list[str]]:
-    """Resolve the security-evidence policy as (mode, required kinds).
-
-    A repository either requires named scan evidence or has deliberately declared
-    that it requires none. Those are different statements, and only the second
-    one is allowed to skip the gate, so the mode has to be explicit rather than
-    inferred from an empty list.
-    """
-    source = source if isinstance(source, Mapping) else {}
-    block = source.get("security_evidence")
-    if isinstance(block, dict):
-        mode = str(block.get("mode") or "")
-        kinds = [str(k) for k in (block.get("required") or []) if k]
-    else:
-        # Flat legacy form: naming kinds means they are required.
-        mode = ""
-        kinds = [str(k) for k in (source.get("required_security_evidence") or []) if k]
-    if kinds:
-        return "required", kinds
-    return ("disabled" if mode == "disabled" else "unconfigured"), []
-
-
-def collect_security_evidence(
-    owner: str,
-    name: str,
-    head_sha: str,
-    token: str,
-    required: Sequence[str],
-    ref: str = "",
-) -> dict[str, Any]:
-    """Retrieve actual scan completion and findings for the required kinds.
-
-    Code-scanning alerts are branch-scoped, so the proposal's own ref is passed
-    rather than relying on the repository default list, which would report the
-    findings of some other branch as if they covered this proposal.
-    """
-    out: dict[str, Any] = {}
-    for kind in required or []:
-        key = str(kind)
-        if key == "code-scanning":
-            out[key] = _collect_code_scanning(owner, name, head_sha, token, ref)
-        elif key == "secret-scanning":
-            out[key] = _collect_alerts(owner, name, _SECRET_SCAN_ALERTS, token, key)
-        else:
-            out[key] = {"state": "unknown-kind"}
-    return out
-
-
-def _collect_code_scanning(
-    owner: str, name: str, head_sha: str, token: str, ref: str = ""
-) -> dict[str, Any]:
-    base = f"https://api.github.com/repos/{owner}/{name}"
-    status, analyses = _api_pages(
-        f"{base}/{_CODE_SCAN_ANALYSES}?commit_sha={head_sha}&per_page=100&page=1", token
-    )
-    if status != 200:
-        return {"state": "unavailable", "detail": f"analyses-http:{status}"}
-    if not isinstance(analyses, list):
-        return {"state": "malformed"}
-    # Do not trust the query filter alone: confirm the returned records are for
-    # this head. A stale-only list does not prove this commit was scanned.
-    current = [
-        item for item in analyses
-        if isinstance(item, dict) and str(item.get("commit_sha") or "") == head_sha
-    ]
-    if not current:
-        # No analysis for this head means the scan did not run here. That is not
-        # an absence of findings.
-        return {"state": "no-analysis-for-head"}
-    analyses = current
-    errored = [
-        item for item in analyses
-        if isinstance(item, dict) and item.get("error") not in (None, "")
-    ]
-    if errored:
-        return {"state": "analysis-error", "count": len(errored)}
-    scope = str(ref or "").strip()
-    if not scope:
-        # Without the proposal's ref there is no way to tell whether the alerts
-        # belong to this head. That is missing scope, not an absence of findings.
-        return {"state": "missing-ref-scope", "analyses": len(analyses)}
-    result = _collect_alerts(
-        owner, name, _CODE_SCAN_ALERTS, token, "code-scanning", ref=scope
-    )
-    if result.get("state") != "ok":
-        return result
-    result["analyses"] = len(analyses)
-    result["ref"] = scope
-    return result
-
-
-def _collect_alerts(
-    owner: str, name: str, endpoint: str, token: str, key: str, ref: str = ""
-) -> dict[str, Any]:
-    base = f"https://api.github.com/repos/{owner}/{name}"
-    query = "?state=open&per_page=100&page=1"
-    if ref:
-        query += f"&ref={urllib.parse.quote(ref, safe='')}"
-    status, alerts = _api_pages(f"{base}/{endpoint}{query}", token)
-    if status != 200:
-        # 403 in particular: the token lacks the scope. That is unavailable
-        # evidence, not an absence of findings.
-        return {"state": "unavailable", "detail": f"alerts-http:{status}"}
-    if not isinstance(alerts, list):
-        return {"state": "malformed"}
-    open_count = _count_open_alerts(alerts, code_scanning=key == "code-scanning")
-    if open_count is None:
-        # A record missing the alert-only field is not proof of zero open alerts.
-        return {"state": "malformed"}
-    return {"state": "ok", "open": open_count}
-
-
-# Recognised states for each API. Anything outside these sets is not a known
-# finding state, so it cannot be counted as resolved - an absent or unrecognised
-# state is missing evidence, and treating it as closed would report a clean scan
-# that was never actually established.
-_CODE_SCAN_ALERT_STATES = {"open", "dismissed", "fixed", "resolved"}
-_SECRET_ALERT_STATES = {"open", "resolved"}
-
-
-def _count_open_alerts(alerts: Sequence[Any], *, code_scanning: bool) -> int | None:
-    """Count open alerts, or return None if the payload is not alert-shaped."""
-    total = 0
-    for item in alerts:
-        if not isinstance(item, dict):
-            return None
-        top = item.get("state")
-        if not isinstance(top, str) or not top:
-            return None
-        if code_scanning:
-            if top not in _CODE_SCAN_ALERT_STATES:
-                return None
-            instance = item.get("most_recent_instance")
-            if not isinstance(instance, dict):
-                return None
-            inner = instance.get("state")
-            # An instance dict without a usable state says nothing about whether
-            # the finding is open, so it cannot be counted as zero.
-            if not isinstance(inner, str) or inner not in _CODE_SCAN_ALERT_STATES:
-                return None
-            # Reconcile the two: the alert's own status and its latest instance
-            # have to agree on whether the finding is currently open.
-            if (top == "open") != (inner == "open"):
-                return None
-            if inner == "open":
-                total += 1
-        else:
-            if top not in _SECRET_ALERT_STATES:
-                return None
-            if top == "open":
-                total += 1
-    return total
-
-
-def verify_security_evidence(
-    evidence: Mapping[str, Any] | None,
-    required: Sequence[str],
-    *,
-    mode: str = "",
-) -> dict[str, Any]:
-    """Open findings block; unavailable evidence defers. Neither reads as clean.
-
-    An empty requirement list is not a pass. It is either a documented decision
-    that this repository requires no scan evidence, or a configuration gap, and
-    the two are reported differently rather than both reading as satisfied.
-    """
-    kinds = [str(kind) for kind in (required or []) if kind]
-    if not kinds:
-        if str(mode) == "disabled":
-            return {"state": "ready", "reason": "security-evidence-not-required"}
-        return {"state": "failed", "reason": "security-evidence-unconfigured"}
-    for key in kinds:
-        found = (evidence or {}).get(key)
-        if not isinstance(found, dict):
-            return {"state": "defer", "reason": f"security-evidence-missing:{key}"}
-        state = str(found.get("state") or "")
-        if state == "ok":
-            if int(found.get("open") or 0) > 0:
-                return {"state": "failed", "reason": f"unresolved-{key}-alerts:{found['open']}"}
-            continue
-        return {"state": "defer", "reason": f"security-evidence-unavailable:{key}:{state}"}
-    return {"state": "ready", "reason": "security-evidence-satisfied"}
-
-
 def diff_touches_workflow_policy(patch: str) -> bool:
     if not patch:
         return False
@@ -1139,7 +720,7 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
     # bound to the approved producing workflow and job, on this head.
     producers_policy = policy.get("check_producers") or {}
     if producers_policy or expected:
-        producers = verify_check_producers(
+        producers = maintenance_common.verify_check_producers(
             snapshot.get("producer_evidence"),
             expected_names=expected,
             head_sha=head_sha,
@@ -1156,7 +737,7 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
 
     # Scan outcomes are separate evidence from the checks that report them.
     required_security = list(policy.get("required_security_evidence") or [])
-    security = verify_security_evidence(
+    security = maintenance_common.verify_security_evidence(
         snapshot.get("security_evidence"),
         required_security,
         mode=str(policy.get("security_evidence_mode") or ""),
@@ -1172,6 +753,67 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
         return Decision(
             "defer",
             str(security.get("reason") or "security-evidence-unavailable"),
+            risk="blocked",
+            checks=classified.get("checks") or {},
+        )
+
+    # A python-bump proposal must name exactly one candidate, derived from the
+    # diff itself. A collector-supplied version that disagrees with the diff is
+    # a mismatch, not a tie-break.
+    derived_candidate = maintenance_common.candidate_version_from_files(
+        snapshot.get("files") if isinstance(snapshot.get("files"), list) else []
+    )
+    supplied_candidate = str(snapshot.get("candidate_version") or "") or None
+    candidate_version = derived_candidate
+    if kind == "python_bump":
+        if not derived_candidate:
+            return Decision(
+                "fail", "candidate-version-unparsed", risk="blocked",
+                checks=classified.get("checks") or {},
+            )
+        if supplied_candidate and supplied_candidate != derived_candidate:
+            return Decision(
+                "fail", "candidate-version-mismatch", risk="blocked",
+                checks=classified.get("checks") or {},
+            )
+
+    # Publication binding: a python-bump PR is only mergeable on bound records
+    # from the trusted proposer run. Profile title/body are never evidence, and
+    # an unconfigured or disabled mode blocks the lane rather than passing it.
+    pub_evidence = (
+        snapshot.get("publication_evidence")
+        if isinstance(snapshot.get("publication_evidence"), dict) else {}
+    )
+    if kind == "python_bump" and pub_evidence.get("error"):
+        return Decision(
+            "fail",
+            str(pub_evidence.get("error") or "publication-collection-failed"),
+            risk="blocked",
+            checks=classified.get("checks") or {},
+        )
+    publication = maintenance_common.verify_publication_gate(
+        mode=str(policy.get("publication_evidence_mode") or ""),
+        kind=kind,
+        evidence=pub_evidence,
+        pr=pr,
+        candidate_version=candidate_version,
+        trusted_proposer_path=str(
+            policy.get("publication_proposer_workflow")
+            or maintenance_common.DEFAULT_PROPOSER_PATH
+        ),
+        proposal_files=list(
+            policy.get("publication_proposal_files")
+            or maintenance_common.DEFAULT_PROPOSAL_FILES
+        ),
+        pinned_pip=str(policy.get("pinned_pip") or maintenance_common.PINNED_PIP),
+        pinned_pip_tools=str(policy.get("pinned_pip_tools") or maintenance_common.PINNED_PIP_TOOLS),
+        repository=expected_repo,
+    )
+    if publication.get("state") != "ready":
+        action = "defer" if publication.get("state") == "pending" else "fail"
+        return Decision(
+            action,
+            str(publication.get("reason") or "publication-evidence"),
             risk="blocked",
             checks=classified.get("checks") or {},
         )
@@ -1295,7 +937,7 @@ def cmd_select(args: argparse.Namespace) -> int:
         current,
         manifest,
         soak_days=int(fixture.get("soak_days") or 30),
-        now=parse_iso_date(fixture.get("now")) or datetime.now(timezone.utc),
+        now=maintenance_common.parse_iso_date(fixture.get("now")) or datetime.now(timezone.utc),
         ignore_soak=bool(fixture.get("ignore_soak")),
         force=fixture.get("force"),
     )
@@ -1397,13 +1039,22 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
     # retrieve actual scan outcomes. Both are evidence the check names alone do
     # not carry, and both are collected here so the pure decision can stay pure.
     mandatory = list(profile.get("mandatory_check_names") or [])
-    producer_evidence = collect_producer_evidence(
-        owner, name, check_runs if isinstance(check_runs, list) else [], mandatory, token
+
+    # The common helpers own no token and no HTTP client: the adapter injects
+    # its own transport, so the shared module stays repository-agnostic.
+    def _get_json(url: str) -> tuple[int, Any]:
+        return _github_json(url, token)
+
+    def _get_pages(url: str) -> tuple[int, Any]:
+        return _api_pages(url, token)
+
+    producer_evidence = maintenance_common.collect_producer_evidence(
+        owner, name, check_runs if isinstance(check_runs, list) else [], mandatory, _get_json
     )
-    _security_mode, required_security = security_policy(profile)
+    _security_mode, required_security = maintenance_common.security_policy(profile)
     head_ref = str((pr.get("head") or {}).get("ref") or "")
-    security_evidence = collect_security_evidence(
-        owner, name, head_sha, token, required_security, ref=head_ref
+    security_evidence = maintenance_common.collect_security_evidence(
+        owner, name, head_sha, required_security, _get_pages, ref=head_ref
     )
     status, files = _api_pages(
         f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/files?per_page=100&page=1",
@@ -1439,6 +1090,34 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         # Trusted base policy only. Reading this from the changed files would let
         # the PR define its own allowlist.
         allowed = list(profile.get("dependabot_allowed_files") or [])
+    pub_mode, pub_path, pub_files = maintenance_common.publication_policy(profile)
+    pinned_pip, pinned_tools = maintenance_common.compiler_pins(profile)
+    publication_block = (
+        profile.get("publication_evidence")
+        if isinstance(profile.get("publication_evidence"), dict) else {}
+    )
+    expected_login, expected_name, expected_email = maintenance_common.configured_commit_identity(
+        publication_block
+    )
+    file_list = files if isinstance(files, list) else []
+    candidate_version = maintenance_common.candidate_version_from_files(file_list)
+    publication_evidence: dict[str, Any] = {}
+    if kind == "python_bump" and pub_mode == "required":
+        publication_evidence = maintenance_common.collect_publication_evidence(
+            owner,
+            name,
+            pr,
+            file_list,
+            get_json=_get_json,
+            get_pages=_get_pages,
+            trusted_proposer_path=pub_path,
+            proposal_files=pub_files,
+            expected_commit_identity=expected_login,
+            expected_commit_name=expected_name,
+            expected_commit_email=expected_email,
+        )
+        if not candidate_version:
+            candidate_version = publication_evidence.get("candidate_version")
     return {
         "repository": full_name,
         "head_sha": head_sha,
@@ -1446,6 +1125,8 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         "checks": check_runs,
         "producer_evidence": producer_evidence,
         "security_evidence": security_evidence,
+        "publication_evidence": publication_evidence,
+        "candidate_version": candidate_version,
         "files": files if isinstance(files, list) else [],
         "reviews": reviews if isinstance(reviews, list) else [],
         "legacy_statuses": legacy if isinstance(legacy, list) else [],
@@ -1462,8 +1143,13 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
             "default_branch": default_branch,
             "mandatory_check_names": profile.get("mandatory_check_names") or [],
             "check_producers": profile.get("check_producers") or {},
-            "security_evidence_mode": security_policy(profile)[0],
+            "security_evidence_mode": maintenance_common.security_policy(profile)[0],
             "required_security_evidence": required_security,
+            "publication_evidence_mode": pub_mode,
+            "publication_proposer_workflow": pub_path,
+            "publication_proposal_files": list(pub_files),
+            "pinned_pip": pinned_pip,
+            "pinned_pip_tools": pinned_tools,
             "human_review_labels": profile.get("human_review_labels") or list(HOLD_LABELS_FALLBACK),
             "updater_identities": profile.get("updater_identities") or {},
             "allowed_merge_method": profile.get("allowed_merge_method") or "squash",

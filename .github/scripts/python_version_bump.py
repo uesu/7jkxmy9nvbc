@@ -24,6 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import maintenance  # noqa: E402
+import maintenance_common  # noqa: E402
 
 REPO_ROOT = maintenance.REPO_ROOT
 
@@ -70,7 +71,7 @@ def _read_release_date_cache(path: Path, now: datetime) -> dict[str, str] | None
         return None
     if not isinstance(raw, dict):
         return None
-    fetched = maintenance.parse_iso_date(str(raw.get("fetched_at") or ""))
+    fetched = maintenance_common.parse_iso_date(str(raw.get("fetched_at") or ""))
     dates = raw.get("dates")
     if fetched is None or not isinstance(dates, dict):
         return None
@@ -122,7 +123,7 @@ def fetch_release_dates(
             match = _RELEASE_NAME_RE.match(str(record.get("name") or "").strip())
             if not match:
                 continue
-            parsed = maintenance.parse_iso_date(str(record.get("release_date") or ""))
+            parsed = maintenance_common.parse_iso_date(str(record.get("release_date") or ""))
             if parsed is None:
                 continue
             # First publication wins: the API can list re-release records, and the
@@ -221,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
             current,
             data.get("manifest") or [],
             soak_days=int(data.get("soak_days") or profile.get("python", {}).get("soak_days_default") or 30),
-            now=maintenance.parse_iso_date(data.get("now")) or datetime.now(timezone.utc),
+            now=maintenance_common.parse_iso_date(data.get("now")) or datetime.now(timezone.utc),
             ignore_soak=bool(data.get("ignore_soak")),
             force=data.get("force"),
         )

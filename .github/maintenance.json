@@ -27,7 +27,7 @@
     "maintenance-ci"
   ],
   "final_gate": "maintenance-ci",
-  "ci_workflow_name": "CI — syntax + offline smoke test",
+  "ci_workflow_name": "CI \u2014 syntax + offline smoke test",
   "test_commands": {
     "compile": [
       "python",
@@ -246,5 +246,16 @@
       "secret-scanning"
     ],
     "note": "mode=disabled is a deliberate, recorded decision, not an empty list standing in for one: with no kinds named the controller reports security-evidence-not-required, and an omitted or unrecognised mode fails closed as security-evidence-unconfigured instead. Reason: this repository runs no code or secret scanning - there is no CodeQL workflow and no default setup - and the merge workflow's GITHUB_TOKEN holds actions/checks/contents/pull-requests/statuses but not security-events, so neither endpoint is reachable. Requiring a scan that is not running would defer every auto-merge with no way to satisfy it, and enabling a scanner is a security-tooling change outside this PR's authorisation. The retrieval, pagination, head-scope and fail-closed behaviour are fully implemented; move a name from candidates to required (and add security-events: read) to enforce it."
+  },
+  "publication_evidence": {
+    "mode": "disabled",
+    "proposer_workflow": ".github/workflows/python_version_bump.yml",
+    "proposal_files": [
+      ".python-version"
+    ],
+    "commit_identity": "github-actions[bot]",
+    "commit_name": "github-actions[bot]",
+    "commit_email": "41898282+github-actions[bot]@users.noreply.github.com",
+    "note": "mode=disabled is a deliberate, recorded decision, not an omission: with no mode the controller fails closed as publication-evidence-unconfigured, and mode=disabled blocks the python-bump auto-merge lane as publication-lane-blocked rather than reading as satisfied. Dependabot proposals are unaffected (publication-not-applicable). Reason: this repository's python_version_bump publish job pushes with BUMP_PAT and commits as github-actions[bot], but it does not yet emit the bound validation and publication notices that verify_publication_record joins on, so there is no evidence to require. Declaring required here would block every python-bump proposal on notices that are never produced, which misstates the cause. The collection, binding and fail-closed behaviour are fully implemented; add notice emission to the publish job (the --emit-publication pattern) and move mode to required to enforce it. PR title and body are never evidence."
   }
 }
