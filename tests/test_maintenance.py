@@ -1796,5 +1796,48 @@ class LiveProducerOutcomeTests(unittest.TestCase):
         self.assertEqual(decision.reason, "producer-attempt-mismatch:application")
 
 
+class ProductionSecurityPolicyTests(unittest.TestCase):
+    """The shipped policy must be an explicit statement, never an omission."""
+
+    def _policy(self):
+        return json.loads((ROOT / ".github" / "maintenance.json").read_text(encoding="utf-8"))
+
+    def test_shipped_policy_is_an_explicit_decision(self):
+        # Regression: an empty requirement list used to satisfy the gate, so a
+        # repository that never configured the requirement looked identical to a
+        # clean one. The shipped policy has to say which of the two it is.
+        mode, kinds = maintenance.security_policy(self._policy())
+        self.assertIn(mode, ("disabled", "required"))
+        self.assertNotEqual(mode, "unconfigured")
+        if mode == "disabled":
+            self.assertEqual(kinds, [])
+        else:
+            self.assertTrue(kinds, "a required mode must name at least one kind")
+
+    def test_moving_a_candidate_to_required_immediately_enforces(self):
+        # The mechanism must be live, not vestigial: enforcing is a policy edit,
+        # not a code change.
+        policy = self._policy()
+        block = dict(policy["security_evidence"])
+        block["mode"] = "required"
+        block["required"] = list(block.get("candidates") or ["code-scanning"])[:1]
+        mode, kinds = maintenance.security_policy({"security_evidence": block})
+        self.assertEqual(mode, "required")
+        self.assertEqual(len(kinds), 1)
+        # With no evidence collected, the gate must defer rather than pass.
+        verdict = maintenance.verify_security_evidence({}, kinds, mode=mode)
+        self.assertEqual(verdict["state"], "defer")
+        self.assertIn("security-evidence-missing", verdict["reason"])
+
+    def test_omitting_the_block_entirely_fails_closed(self):
+        stripped = {k: v for k, v in self._policy().items() if k != "security_evidence"}
+        stripped.pop("required_security_evidence", None)
+        mode, _ = maintenance.security_policy(stripped)
+        self.assertEqual(mode, "unconfigured")
+        self.assertEqual(
+            maintenance.verify_security_evidence({}, [], mode=mode)["state"], "failed"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

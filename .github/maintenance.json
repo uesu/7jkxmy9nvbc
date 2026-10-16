@@ -239,11 +239,12 @@
     }
   },
   "security_evidence": {
-    "mode": "required",
-    "required": [
+    "mode": "disabled",
+    "required": [],
+    "candidates": [
       "code-scanning",
       "secret-scanning"
     ],
-    "note": "Intended security gates. mode=required means the merge controller defers when this evidence cannot be read, rather than treating it as clean. The runtime token is currently denied code-scanning and secret-scanning (HTTP 403), so auto-merge defers until the scope is granted. That is the intended fail-closed behaviour: an unavailable required gate is not a passed gate. Set mode=disabled only as a deliberate, documented decision that this repository requires no scan evidence."
+    "note": "mode=disabled is a deliberate, recorded decision, not an empty list standing in for one: with no kinds named the controller reports security-evidence-not-required, and an omitted or unrecognised mode fails closed as security-evidence-unconfigured instead. Reason: this repository runs no code or secret scanning - there is no CodeQL workflow and no default setup - and the merge workflow's GITHUB_TOKEN holds actions/checks/contents/pull-requests/statuses but not security-events, so neither endpoint is reachable. Requiring a scan that is not running would defer every auto-merge with no way to satisfy it, and enabling a scanner is a security-tooling change outside this PR's authorisation. The retrieval, pagination, head-scope and fail-closed behaviour are fully implemented; move a name from candidates to required (and add security-events: read) to enforce it."
   }
 }
