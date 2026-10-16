@@ -2507,5 +2507,16 @@ class LivePublicationLaneTests(unittest.TestCase):
         self.assertEqual(decision.reason, "publication-collection-failed")
 
 
+class ReviewedSharedBytesTests(unittest.TestCase):
+    def test_common_helper_matches_reviewed_bytes(self):
+        import hashlib
+
+        path = Path(__file__).resolve().parents[1] / ".github/scripts/maintenance_common.py"
+        self.assertEqual(
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            "9e04a5150c407d75e62bfb83cdbab2b386e49f6b1ef4c42710da679d3b1593f3",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
