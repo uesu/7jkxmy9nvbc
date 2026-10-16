@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -755,7 +756,7 @@ class CheckAuthenticationTests(unittest.TestCase):
 class PreMergeRefreshTests(unittest.TestCase):
     """A second complete snapshot must be taken immediately before merging."""
 
-    def _run(self, snapshots, tmpdir):
+    def _run(self, snapshots, tmpdir, confirmed=True):
         event = tmpdir / "event.json"
         event.write_text("{}", encoding="utf-8")
         saved = {
@@ -763,6 +764,7 @@ class PreMergeRefreshTests(unittest.TestCase):
             "build": maintenance.build_live_snapshot,
             "merge": maintenance.merge_pull,
             "profile": maintenance.load_profile,
+            "api": maintenance._github_json,
         }
         calls = []
         sequence = list(snapshots)
@@ -779,6 +781,15 @@ class PreMergeRefreshTests(unittest.TestCase):
         maintenance.build_live_snapshot = fake_build
         maintenance.merge_pull = fake_merge
         maintenance.load_profile = lambda _p=None: {}
+
+        def fake_api(url, _token=None):
+            # The post-merge confirmation re-read is part of the real path; stub
+            # it rather than letting the test depend on live GitHub state.
+            if re.fullmatch(r"https://api\.github\.com/repos/[^/]+/[^/]+/pulls/\d+", url):
+                return 200, {"merged": confirmed}
+            return 404, {}
+
+        maintenance._github_json = fake_api
         try:
             args = argparse.Namespace(profile=None, apply_live=True)
             code = maintenance.cmd_apply_live(args)
@@ -788,6 +799,7 @@ class PreMergeRefreshTests(unittest.TestCase):
             maintenance.build_live_snapshot = saved["build"]
             maintenance.merge_pull = saved["merge"]
             maintenance.load_profile = saved["profile"]
+            maintenance._github_json = saved["api"]
         return code, calls
 
     @staticmethod
@@ -835,6 +847,14 @@ class PreMergeRefreshTests(unittest.TestCase):
             code, calls = self._run([_snapshot(), _snapshot()], Path(tmp))
         self.assertEqual(len(calls), 1, "a genuinely green PR must still merge")
         self.assertEqual(code, 0)
+
+    def test_an_unconfirmed_merge_fails_closed(self):
+        # A truthy merged flag from the merge call is not trusted on its own; the
+        # PR is re-read, and a head that did not actually merge must fail.
+        with tempfile.TemporaryDirectory() as tmp:
+            code, calls = self._run([_snapshot(), _snapshot()], Path(tmp), confirmed=False)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(code, 1)
 
 
 class LiveAdapterEvidenceTests(unittest.TestCase):
