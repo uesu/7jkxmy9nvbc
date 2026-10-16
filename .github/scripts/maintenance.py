@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -578,9 +579,11 @@ def collect_producer_evidence(
             "job": str(job.get("name") or ""),
             "check_run_id": _as_positive_int(run.get("id")),
             "run_id": run_id,
+            "run_record_id": _as_positive_int(wf_run.get("id")),
             "job_id": job_id,
             "job_record_id": _as_positive_int(job.get("id")),
             "job_run_id": _as_positive_int(job.get("run_id")),
+            "job_check_run_url": str(job.get("check_run_url") or ""),
             "run_attempt": _as_positive_int(wf_run.get("run_attempt")),
             "job_run_attempt": _as_positive_int(job.get("run_attempt")),
             "head_sha": str(wf_run.get("head_sha") or ""),
@@ -608,6 +611,7 @@ def verify_check_producers(
     expected_names: Sequence[str],
     head_sha: str,
     producers: Mapping[str, Any] | None,
+    repository: str = "",
 ) -> dict[str, Any]:
     """Pure producer binding. Every gap blocks; nothing is inferred from a name.
 
@@ -631,7 +635,9 @@ def verify_check_producers(
                 "reason": f"producer-evidence-unavailable:{check_name}:{found['error']}",
             }
 
-        failure = _producer_identity_failure(check_name, found)
+        failure = _producer_identity_failure(check_name, found) or _producer_check_link_failure(
+            check_name, found, repository
+        )
         if failure:
             return {"state": "failed", "reason": failure}
 
@@ -664,12 +670,45 @@ def _producer_identity_failure(check_name: str, found: Mapping[str, Any]) -> str
     # The job must belong to the run that was fetched, not merely share a name.
     if found.get("job_run_id") != run_id:
         return f"producer-run-id-mismatch:{check_name}"
+    # And the run that was fetched must be the run that was asked for.
+    if found.get("run_record_id") != run_id:
+        return f"producer-run-record-mismatch:{check_name}"
     run_attempt = found.get("run_attempt")
     if not isinstance(run_attempt, int) or run_attempt <= 0:
         return f"producer-missing-run-attempt:{check_name}"
     # A job from an earlier attempt is stale evidence for this run.
     if found.get("job_run_attempt") != run_attempt:
         return f"producer-attempt-mismatch:{check_name}"
+    return ""
+
+
+_CHECK_RUN_API_RE = re.compile(
+    r"^https://api\.github\.com/repos/([^/\s]+)/([^/\s]+)/check-runs/(\d+)/?$"
+)
+
+
+def _producer_check_link_failure(
+    check_name: str, found: Mapping[str, Any], repository: str
+) -> str:
+    """Bind the fetched job to the exact check run being authenticated.
+
+    The job was located through the check run's details_url, so the job's own
+    canonical check-run reference has to point back at that same check in the same
+    repository. Without this, a successful job reached through one check's URL can
+    stand in for a different check that never ran.
+    """
+    check_run_id = found.get("check_run_id")
+    if not isinstance(check_run_id, int) or check_run_id <= 0:
+        return f"producer-missing-check-run-id:{check_name}"
+    url = str(found.get("job_check_run_url") or "").strip()
+    match = _CHECK_RUN_API_RE.match(url)
+    if not match:
+        return f"producer-missing-check-run-url:{check_name}"
+    owner, repo, linked_id = match.groups()
+    if repository and f"{owner}/{repo}" != repository:
+        return f"producer-check-run-foreign-repository:{check_name}"
+    if int(linked_id) != check_run_id:
+        return f"producer-check-run-id-mismatch:{check_name}"
     return ""
 
 
@@ -726,13 +765,19 @@ def collect_security_evidence(
     head_sha: str,
     token: str,
     required: Sequence[str],
+    ref: str = "",
 ) -> dict[str, Any]:
-    """Retrieve actual scan completion and findings for the required kinds."""
+    """Retrieve actual scan completion and findings for the required kinds.
+
+    Code-scanning alerts are branch-scoped, so the proposal's own ref is passed
+    rather than relying on the repository default list, which would report the
+    findings of some other branch as if they covered this proposal.
+    """
     out: dict[str, Any] = {}
     for kind in required or []:
         key = str(kind)
         if key == "code-scanning":
-            out[key] = _collect_code_scanning(owner, name, head_sha, token)
+            out[key] = _collect_code_scanning(owner, name, head_sha, token, ref)
         elif key == "secret-scanning":
             out[key] = _collect_alerts(owner, name, _SECRET_SCAN_ALERTS, token, key)
         else:
@@ -740,7 +785,9 @@ def collect_security_evidence(
     return out
 
 
-def _collect_code_scanning(owner: str, name: str, head_sha: str, token: str) -> dict[str, Any]:
+def _collect_code_scanning(
+    owner: str, name: str, head_sha: str, token: str, ref: str = ""
+) -> dict[str, Any]:
     base = f"https://api.github.com/repos/{owner}/{name}"
     status, analyses = _api_pages(
         f"{base}/{_CODE_SCAN_ANALYSES}?commit_sha={head_sha}&per_page=100&page=1", token
@@ -766,18 +813,29 @@ def _collect_code_scanning(owner: str, name: str, head_sha: str, token: str) -> 
     ]
     if errored:
         return {"state": "analysis-error", "count": len(errored)}
-    result = _collect_alerts(owner, name, _CODE_SCAN_ALERTS, token, "code-scanning")
+    scope = str(ref or "").strip()
+    if not scope:
+        # Without the proposal's ref there is no way to tell whether the alerts
+        # belong to this head. That is missing scope, not an absence of findings.
+        return {"state": "missing-ref-scope", "analyses": len(analyses)}
+    result = _collect_alerts(
+        owner, name, _CODE_SCAN_ALERTS, token, "code-scanning", ref=scope
+    )
     if result.get("state") != "ok":
         return result
     result["analyses"] = len(analyses)
+    result["ref"] = scope
     return result
 
 
 def _collect_alerts(
-    owner: str, name: str, endpoint: str, token: str, key: str
+    owner: str, name: str, endpoint: str, token: str, key: str, ref: str = ""
 ) -> dict[str, Any]:
     base = f"https://api.github.com/repos/{owner}/{name}"
-    status, alerts = _api_pages(f"{base}/{endpoint}?state=open&per_page=100&page=1", token)
+    query = "?state=open&per_page=100&page=1"
+    if ref:
+        query += f"&ref={urllib.parse.quote(ref, safe='')}"
+    status, alerts = _api_pages(f"{base}/{endpoint}{query}", token)
     if status != 200:
         # 403 in particular: the token lacks the scope. That is unavailable
         # evidence, not an absence of findings.
@@ -791,20 +849,44 @@ def _collect_alerts(
     return {"state": "ok", "open": open_count}
 
 
+# Recognised states for each API. Anything outside these sets is not a known
+# finding state, so it cannot be counted as resolved - an absent or unrecognised
+# state is missing evidence, and treating it as closed would report a clean scan
+# that was never actually established.
+_CODE_SCAN_ALERT_STATES = {"open", "dismissed", "fixed", "resolved"}
+_SECRET_ALERT_STATES = {"open", "resolved"}
+
+
 def _count_open_alerts(alerts: Sequence[Any], *, code_scanning: bool) -> int | None:
     """Count open alerts, or return None if the payload is not alert-shaped."""
     total = 0
     for item in alerts:
         if not isinstance(item, dict):
             return None
+        top = item.get("state")
+        if not isinstance(top, str) or not top:
+            return None
         if code_scanning:
+            if top not in _CODE_SCAN_ALERT_STATES:
+                return None
             instance = item.get("most_recent_instance")
             if not isinstance(instance, dict):
                 return None
-            if str(instance.get("state") or "") == "open":
+            inner = instance.get("state")
+            # An instance dict without a usable state says nothing about whether
+            # the finding is open, so it cannot be counted as zero.
+            if not isinstance(inner, str) or inner not in _CODE_SCAN_ALERT_STATES:
+                return None
+            # Reconcile the two: the alert's own status and its latest instance
+            # have to agree on whether the finding is currently open.
+            if (top == "open") != (inner == "open"):
+                return None
+            if inner == "open":
                 total += 1
         else:
-            if str(item.get("state") or "") == "open":
+            if top not in _SECRET_ALERT_STATES:
+                return None
+            if top == "open":
                 total += 1
     return total
 
@@ -1062,6 +1144,7 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
             expected_names=expected,
             head_sha=head_sha,
             producers=producers_policy,
+            repository=expected_repo,
         )
         if producers.get("state") != "ready":
             return Decision(
@@ -1318,8 +1401,9 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         owner, name, check_runs if isinstance(check_runs, list) else [], mandatory, token
     )
     _security_mode, required_security = security_policy(profile)
+    head_ref = str((pr.get("head") or {}).get("ref") or "")
     security_evidence = collect_security_evidence(
-        owner, name, head_sha, token, required_security
+        owner, name, head_sha, token, required_security, ref=head_ref
     )
     status, files = _api_pages(
         f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/files?per_page=100&page=1",

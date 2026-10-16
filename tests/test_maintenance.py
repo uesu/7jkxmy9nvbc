@@ -53,16 +53,19 @@ def _pr(*, login="dependabot[bot]", sha=SHA, ref="dependabot/pip/foo", draft=Fal
     }
 
 
-def _producer(**overrides):
+def _producer(repository=REPO, **overrides):
     """A fully identified, successfully completed producer record."""
+    check_run_id = int(overrides.get("check_run_id") or 5)
     data = {
         "workflow": ".github/workflows/ci.yml",
         "job": "application",
-        "check_run_id": 5,
+        "check_run_id": check_run_id,
         "run_id": 38830784916,
+        "run_record_id": 38830784916,
         "job_id": 116749043297,
         "job_record_id": 116749043297,
         "job_run_id": 38830784916,
+        "job_check_run_url": f"https://api.github.com/repos/{repository}/check-runs/{check_run_id}",
         "run_attempt": 1,
         "job_run_attempt": 1,
         "head_sha": SHA,
@@ -1235,6 +1238,7 @@ class CheckProducerBindingTests(unittest.TestCase):
             expected_names=list(expected),
             head_sha=SHA,
             producers=self.APPROVED if producers is self._UNSET else producers,
+            repository=REPO,
         )
 
     def test_an_approved_producer_is_verified(self):
@@ -1384,6 +1388,7 @@ class LiveProducerCollectionTests(unittest.TestCase):
                 return job_status, {
                     "id": 88, "run_id": 77, "name": "application", "head_sha": SHA,
                     "run_attempt": 1, "status": "completed", "conclusion": "success",
+                    "check_run_url": "https://api.github.com/repos/acme/app/check-runs/1",
                 }
             if "/actions/runs/77" in url:
                 return run_status, {
@@ -1465,11 +1470,16 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         "category": "/codeql", "error": None, "results_url": "u",
     }
 
-    def _collect(self, responder, required=("code-scanning",)):
+    REF = "topic"
+
+    def _collect(self, responder, required=("code-scanning",), ref=None):
         original = maintenance._github_json
         maintenance._github_json = responder
         try:
-            return maintenance.collect_security_evidence("o", "r", SHA, "token", list(required))
+            return maintenance.collect_security_evidence(
+                "o", "r", SHA, "token", list(required),
+                ref=self.REF if ref is None else ref,
+            )
         finally:
             maintenance._github_json = original
 
@@ -1515,6 +1525,7 @@ class ScanEvidenceShapeTests(unittest.TestCase):
     def test_open_alerts_from_the_alerts_endpoint_block(self):
         alert = {"number": 7, "state": "open",
                  "most_recent_instance": {"state": "open", "commit_sha": SHA}}
+        # (top-level and instance state must agree; see the reconciliation rule)
         result = self._collect(self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert]))
         self.assertEqual(result["code-scanning"]["state"], "ok")
         self.assertEqual(result["code-scanning"]["open"], 1)
@@ -1567,6 +1578,88 @@ class ScanEvidenceShapeTests(unittest.TestCase):
         self.assertEqual(
             maintenance.verify_security_evidence(result, ["code-scanning"])["state"], "defer"
         )
+
+    def test_an_absent_or_unknown_alert_state_is_never_read_as_resolved(self):
+        # Regression: _count_open_alerts rejected a missing instance dict but not
+        # a missing or unrecognised state inside one, so {state: open,
+        # most_recent_instance: {}} counted as zero open and the gate read ready.
+        cases = {
+            "empty instance dict": {"state": "open", "most_recent_instance": {}},
+            "null instance state": {"state": "open",
+                                    "most_recent_instance": {"state": None}},
+            "unknown instance state": {"state": "open",
+                                       "most_recent_instance": {"state": "weird"}},
+            "missing top-level state": {"most_recent_instance": {"state": "open"}},
+            "unknown top-level state": {"state": "weird",
+                                        "most_recent_instance": {"state": "open"}},
+            "top and instance disagree": {"state": "dismissed",
+                                          "most_recent_instance": {"state": "open"}},
+        }
+        for label, alert in cases.items():
+            with self.subTest(case=label):
+                result = self._collect(
+                    self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[alert])
+                )
+                self.assertEqual(result["code-scanning"]["state"], "malformed", label)
+                self.assertEqual(
+                    maintenance.verify_security_evidence(
+                        result, ["code-scanning"], mode="required"
+                    )["state"],
+                    "defer",
+                    label,
+                )
+
+    def test_a_secret_alert_without_a_state_is_not_read_as_resolved(self):
+        original = maintenance._github_json
+
+        def responder(url, *a, **k):
+            if "secret-scanning/alerts" in url:
+                return 200, [{"number": 3}]
+            return 404, {}
+
+        maintenance._github_json = responder
+        try:
+            result = maintenance.collect_security_evidence(
+                "o", "r", SHA, "token", ["secret-scanning"]
+            )
+        finally:
+            maintenance._github_json = original
+        self.assertEqual(result["secret-scanning"]["state"], "malformed")
+
+    def test_alerts_are_scoped_to_the_proposal_ref(self):
+        # The repository-default alert list describes some other branch; without
+        # the proposal's ref there is no scope to judge, so it must defer.
+        result = self._collect(
+            self._responder(analyses=[self.HEAD_ANALYSIS], alerts=[]), ref=""
+        )
+        self.assertEqual(result["code-scanning"]["state"], "missing-ref-scope")
+        self.assertEqual(
+            maintenance.verify_security_evidence(
+                result, ["code-scanning"], mode="required"
+            )["state"],
+            "defer",
+        )
+
+    def test_the_ref_reaches_the_alerts_request(self):
+        seen = {}
+        original = maintenance._github_json
+
+        def responder(url, *a, **k):
+            if "code-scanning/alerts" in url:
+                seen["url"] = url
+                return 200, []
+            if "code-scanning/analyses" in url:
+                return 200, [self.HEAD_ANALYSIS]
+            return 404, {}
+
+        maintenance._github_json = responder
+        try:
+            maintenance.collect_security_evidence(
+                "o", "r", SHA, "token", ["code-scanning"], ref="feature/x y"
+            )
+        finally:
+            maintenance._github_json = original
+        self.assertIn("ref=feature%2Fx%20y", seen["url"])
 
     def test_secret_scanning_alerts_use_the_alert_state_field(self):
         original = maintenance._github_json
@@ -1649,6 +1742,7 @@ class ProducerOutcomeTests(unittest.TestCase):
             expected_names=["application"],
             head_sha=SHA,
             producers=self.APPROVED,
+            repository=REPO,
         )
 
     def test_a_fully_identified_successful_producer_passes(self):
@@ -1734,6 +1828,7 @@ class LiveProducerOutcomeTests(unittest.TestCase):
         job_payload = {
             "id": 88, "run_id": 77, "name": "application", "head_sha": SHA,
             "run_attempt": 1, "status": "completed", "conclusion": "success",
+            "check_run_url": "https://api.github.com/repos/acme/app/check-runs/1",
         }
         run_payload = {
             "id": 77, "path": ".github/workflows/ci.yml", "head_sha": SHA,
@@ -1837,6 +1932,156 @@ class ProductionSecurityPolicyTests(unittest.TestCase):
         self.assertEqual(
             maintenance.verify_security_evidence({}, [], mode=mode)["state"], "failed"
         )
+
+
+class CheckRunLinkTests(unittest.TestCase):
+    """The fetched job must point back at the exact check being authenticated."""
+
+    APPROVED = {
+        "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+    }
+
+    def _verify(self, **overrides):
+        return maintenance.verify_check_producers(
+            {"application": _producer(**overrides)},
+            expected_names=["application"],
+            head_sha=SHA,
+            producers=self.APPROVED,
+            repository=REPO,
+        )
+
+    def test_a_matching_check_run_link_verifies(self):
+        self.assertEqual(self._verify()["state"], "ready")
+
+    def test_every_link_gap_blocks(self):
+        # Regression: the stored check id was never compared to the fetched job's
+        # check_run_url, so a job reached through one check's URL could stand in
+        # for a different check that never ran.
+        cases = {
+            "job names another check": (
+                {"job_check_run_url": f"https://api.github.com/repos/{REPO}/check-runs/999"},
+                "producer-check-run-id-mismatch:application",
+            ),
+            "no check_run_url": (
+                {"job_check_run_url": ""},
+                "producer-missing-check-run-url:application",
+            ),
+            "unparseable check_run_url": (
+                {"job_check_run_url": "https://example.com/check-runs/5"},
+                "producer-missing-check-run-url:application",
+            ),
+            "foreign repository in the link": (
+                {"job_check_run_url": "https://api.github.com/repos/evil/other/check-runs/5"},
+                "producer-check-run-foreign-repository:application",
+            ),
+            "no check id recorded": (
+                {"check_run_id": None},
+                "producer-missing-check-run-id:application",
+            ),
+            "fetched run is not the requested run": (
+                {"run_record_id": 999},
+                "producer-run-record-mismatch:application",
+            ),
+        }
+        for label, (overrides, expected) in cases.items():
+            with self.subTest(case=label):
+                verdict = self._verify(**overrides)
+                self.assertEqual(verdict["state"], "failed", label)
+                self.assertEqual(verdict["reason"], expected, label)
+
+    def test_a_job_naming_a_different_check_blocks_the_merge(self):
+        snapshot = _snapshot(
+            producer_evidence={
+                "application": _producer(
+                    job_check_run_url=f"https://api.github.com/repos/{REPO}/check-runs/999"
+                )
+            }
+        )
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-check-run-id-mismatch:application")
+
+
+class LiveCheckRunLinkTests(unittest.TestCase):
+    """Collector plus verifier against REST payloads that disagree."""
+
+    EVENT = {
+        "repository": {"full_name": "acme/app", "default_branch": "main"},
+        "pull_request": {"number": 12, "head": {"sha": SHA}},
+    }
+    PROFILE = {
+        "mandatory_check_names": ["application"],
+        "check_producers": {
+            "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+        },
+        "dependabot_allowed_files": ["requirements.txt"],
+        "security_evidence": {"mode": "disabled", "required": []},
+        "updater_identities": {
+            "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
+        },
+    }
+    FILES = [{"filename": "requirements.txt", "patch": "-aiohttp==3.14.4\n+aiohttp==3.14.5\n"}]
+    CHECK = {
+        "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+        "conclusion": "success", "app": {"slug": "github-actions"},
+        "details_url": "https://github.com/acme/app/actions/runs/77/job/88",
+    }
+
+    def _decide(self, *, check_run_id=1, run_record_id=77):
+        job = {
+            "id": 88, "run_id": 77, "name": "application", "head_sha": SHA,
+            "run_attempt": 1, "status": "completed", "conclusion": "success",
+            "check_run_url": f"https://api.github.com/repos/acme/app/check-runs/{check_run_id}",
+        }
+        run = {
+            "id": run_record_id, "path": ".github/workflows/ci.yml", "head_sha": SHA,
+            "run_attempt": 1, "status": "completed", "conclusion": "success",
+        }
+
+        def responder(url, *a, **k):
+            if "/actions/jobs/88" in url:
+                return 200, job
+            if "/actions/runs/77" in url:
+                return 200, run
+            if "/pulls/12/files" in url:
+                return 200, []
+            if "/pulls/12/reviews" in url:
+                return 200, []
+            if "/check-runs" in url:
+                return 200, {"check_runs": [self.CHECK], "total_count": 1}
+            if url.endswith("/status"):
+                return 200, {"state": "success", "statuses": []}
+            if url.endswith("/pulls/12"):
+                return 200, _pr()
+            return 404, {}
+
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            snapshot = maintenance.build_live_snapshot(self.EVENT, "token", self.PROFILE)
+        finally:
+            maintenance._github_json = original
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(head_repo="acme/app", base_repo="acme/app", sha=SHA)
+        snapshot["files"] = self.FILES
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"}
+        snapshot["variables"] = {"AUTO_MERGE_DEPENDABOT": "yes"}
+        return maintenance.decide_merge(snapshot)
+
+    def test_a_consistent_link_merges(self):
+        decision = self._decide()
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+    def test_a_job_naming_another_check_blocks(self):
+        decision = self._decide(check_run_id=999)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-check-run-id-mismatch:application")
+
+    def test_a_run_that_is_not_the_requested_run_blocks(self):
+        decision = self._decide(run_record_id=555)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "producer-run-record-mismatch:application")
 
 
 if __name__ == "__main__":
