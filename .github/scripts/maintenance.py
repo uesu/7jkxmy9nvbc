@@ -509,6 +509,179 @@ WORKFLOW_POLICY_HINTS = (
 WORKFLOW_RUN_HINT = re.compile(r"^\s+run:\s*", re.M)
 
 
+# --- Producer identity and security evidence -------------------------------
+#
+# A check name plus a `github-actions` app slug is not identity: anything able to
+# create a check run can choose a familiar name. Each mandatory gate is therefore
+# bound to the workflow file and job approved to produce it, resolved from the
+# check's own run and job identifiers. Unresolved, unavailable or mismatched
+# evidence blocks; nothing is inferred from the name.
+
+_CHECK_RUN_URL_RE = re.compile(
+    r"^https://github\.com/([^/\s]+)/([^/\s]+)/actions/runs/(\d+)/job/(\d+)/?$"
+)
+
+
+def parse_check_run_identity(details_url: Any, expected_repository: str) -> tuple[int, int] | None:
+    """Return (run_id, job_id) only for a run belonging to the expected repository."""
+    match = _CHECK_RUN_URL_RE.match(str(details_url or "").strip())
+    if not match:
+        return None
+    owner, repo, run_id, job_id = match.groups()
+    if f"{owner}/{repo}" != str(expected_repository or ""):
+        return None
+    return int(run_id), int(job_id)
+
+
+def collect_producer_evidence(
+    owner: str,
+    name: str,
+    check_runs: Sequence[Mapping[str, Any]],
+    expected_names: Sequence[str],
+    token: str,
+) -> dict[str, Any]:
+    """Resolve each mandatory check to the workflow run and job that produced it."""
+    expected = {n for n in expected_names if n}
+    evidence: dict[str, Any] = {}
+    for run in check_runs or []:
+        if not isinstance(run, dict):
+            continue
+        check_name = str(run.get("name") or "")
+        if check_name not in expected or check_name in evidence:
+            continue
+        identity = parse_check_run_identity(
+            run.get("details_url") or run.get("html_url"), f"{owner}/{name}"
+        )
+        if identity is None:
+            evidence[check_name] = {"error": "unresolvable-details-url"}
+            continue
+        run_id, job_id = identity
+        status, job = _github_json(
+            f"https://api.github.com/repos/{owner}/{name}/actions/jobs/{job_id}", token
+        )
+        if status != 200 or not isinstance(job, dict):
+            evidence[check_name] = {"error": f"job-api:{status}"}
+            continue
+        status, wf_run = _github_json(
+            f"https://api.github.com/repos/{owner}/{name}/actions/runs/{run_id}", token
+        )
+        if status != 200 or not isinstance(wf_run, dict):
+            evidence[check_name] = {"error": f"run-api:{status}"}
+            continue
+        evidence[check_name] = {
+            "workflow": str(wf_run.get("path") or ""),
+            "job": str(job.get("name") or ""),
+            "run_id": run_id,
+            "job_id": job_id,
+            "run_attempt": int(wf_run.get("run_attempt") or 0),
+            "head_sha": str(wf_run.get("head_sha") or job.get("head_sha") or ""),
+            "conclusion": str(job.get("conclusion") or ""),
+        }
+    return evidence
+
+
+def verify_check_producers(
+    evidence: Mapping[str, Any] | None,
+    *,
+    expected_names: Sequence[str],
+    head_sha: str,
+    producers: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Pure producer binding. Every gap blocks; nothing is inferred from a name."""
+    if not producers:
+        return {"state": "failed", "reason": "no-approved-producers-configured"}
+    for check_name in expected_names:
+        approved = producers.get(check_name)
+        if not isinstance(approved, dict):
+            return {"state": "failed", "reason": f"no-approved-producer:{check_name}"}
+        found = (evidence or {}).get(check_name)
+        if not isinstance(found, dict):
+            return {"state": "failed", "reason": f"missing-producer-evidence:{check_name}"}
+        if found.get("error"):
+            return {
+                "state": "failed",
+                "reason": f"producer-evidence-unavailable:{check_name}:{found['error']}",
+            }
+        if str(found.get("workflow") or "") != str(approved.get("workflow") or ""):
+            return {"state": "failed", "reason": f"unapproved-producer-workflow:{check_name}"}
+        if str(found.get("job") or "") != str(approved.get("job") or ""):
+            return {"state": "failed", "reason": f"unapproved-producer-job:{check_name}"}
+        if str(found.get("head_sha") or "") != str(head_sha):
+            return {"state": "failed", "reason": f"producer-head-mismatch:{check_name}"}
+    return {"state": "ready", "reason": "producers-verified"}
+
+
+# Security evidence is retrieved rather than assumed. The scan APIs are separate
+# from check runs, so a green `workflow-security` job does not by itself prove
+# there are no open findings.
+
+_SECURITY_ENDPOINTS = {
+    "code-scanning": "code-scanning/analyses?per_page=100",
+    "secret-scanning": "secret-scanning/alerts?state=open&per_page=100",
+}
+
+
+def collect_security_evidence(
+    owner: str,
+    name: str,
+    head_sha: str,
+    token: str,
+    required: Sequence[str],
+) -> dict[str, Any]:
+    """Retrieve actual scan outcomes for the required kinds."""
+    out: dict[str, Any] = {}
+    for kind in required or []:
+        key = str(kind)
+        endpoint = _SECURITY_ENDPOINTS.get(key)
+        if not endpoint:
+            out[key] = {"state": "unknown-kind"}
+            continue
+        status, payload = _github_json(
+            f"https://api.github.com/repos/{owner}/{name}/{endpoint}", token
+        )
+        if status == 404:
+            out[key] = {"state": "not-enabled"}
+        elif status != 200:
+            # 403 in particular: the token lacks the scope, which is unavailable
+            # evidence, not an absence of findings.
+            out[key] = {"state": "unavailable", "detail": f"http:{status}"}
+        elif not isinstance(payload, list):
+            out[key] = {"state": "malformed"}
+        else:
+            if key == "code-scanning":
+                relevant = [
+                    item for item in payload
+                    if isinstance(item, dict) and str(item.get("commit_sha") or "") == head_sha
+                ]
+                open_items = [
+                    item for item in relevant
+                    if str((item.get("most_recent_instance") or {}).get("state") or "") == "open"
+                ]
+            else:
+                open_items = [item for item in payload if isinstance(item, dict)]
+            out[key] = {"state": "ok", "open": len(open_items)}
+    return out
+
+
+def verify_security_evidence(
+    evidence: Mapping[str, Any] | None,
+    required: Sequence[str],
+) -> dict[str, Any]:
+    """Open findings block; unavailable evidence defers. Neither reads as clean."""
+    for kind in required or []:
+        key = str(kind)
+        found = (evidence or {}).get(key)
+        if not isinstance(found, dict):
+            return {"state": "defer", "reason": f"security-evidence-missing:{key}"}
+        state = str(found.get("state") or "")
+        if state == "ok":
+            if int(found.get("open") or 0) > 0:
+                return {"state": "failed", "reason": f"unresolved-{key}-alerts:{found['open']}"}
+            continue
+        return {"state": "defer", "reason": f"security-evidence-unavailable:{key}:{state}"}
+    return {"state": "ready", "reason": "security-evidence-satisfied"}
+
+
 def diff_touches_workflow_policy(patch: str) -> bool:
     if not patch:
         return False
@@ -722,6 +895,45 @@ def decide_merge(snapshot: Mapping[str, Any]) -> Decision:
     if classified.get("state") != "ready":
         action = "defer" if classified.get("state") == "pending" else "fail"
         return Decision(action, str(classified.get("reason") or "checks"), risk="blocked", checks=classified.get("checks") or {})
+
+    # A green check under a familiar name is not proof of who ran it. The gate is
+    # bound to the approved producing workflow and job, on this head.
+    producers_policy = policy.get("check_producers") or {}
+    if producers_policy or expected:
+        producers = verify_check_producers(
+            snapshot.get("producer_evidence"),
+            expected_names=expected,
+            head_sha=head_sha,
+            producers=producers_policy,
+        )
+        if producers.get("state") != "ready":
+            return Decision(
+                "fail",
+                str(producers.get("reason") or "producers"),
+                risk="blocked",
+                checks=classified.get("checks") or {},
+            )
+
+    # Scan outcomes are separate evidence from the checks that report them.
+    required_security = list(policy.get("required_security_evidence") or [])
+    if required_security:
+        security = verify_security_evidence(
+            snapshot.get("security_evidence"), required_security
+        )
+        if security.get("state") == "failed":
+            return Decision(
+                "fail",
+                str(security.get("reason") or "security-evidence"),
+                risk="blocked",
+                checks=classified.get("checks") or {},
+            )
+        if security.get("state") != "ready":
+            return Decision(
+                "defer",
+                str(security.get("reason") or "security-evidence-unavailable"),
+                risk="blocked",
+                checks=classified.get("checks") or {},
+            )
 
     risk_info = snapshot.get("risk") or {"risk": "review-required", "auto_eligible": False}
     risk = str(risk_info.get("risk") or "review-required")
@@ -940,6 +1152,17 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
     )
     if status != 200:
         return Decision("fail", f"checks-api:{status}")
+    # Bind every mandatory gate to the workflow run and job that produced it, and
+    # retrieve actual scan outcomes. Both are evidence the check names alone do
+    # not carry, and both are collected here so the pure decision can stay pure.
+    mandatory = list(profile.get("mandatory_check_names") or [])
+    producer_evidence = collect_producer_evidence(
+        owner, name, check_runs if isinstance(check_runs, list) else [], mandatory, token
+    )
+    required_security = list(profile.get("required_security_evidence") or [])
+    security_evidence = collect_security_evidence(
+        owner, name, head_sha, token, required_security
+    )
     status, files = _api_pages(
         f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/files?per_page=100&page=1",
         token,
@@ -979,6 +1202,8 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
         "head_sha": head_sha,
         "pull_request": pr,
         "checks": check_runs,
+        "producer_evidence": producer_evidence,
+        "security_evidence": security_evidence,
         "files": files if isinstance(files, list) else [],
         "reviews": reviews if isinstance(reviews, list) else [],
         "legacy_statuses": legacy if isinstance(legacy, list) else [],
@@ -994,6 +1219,8 @@ def build_live_snapshot(event: Mapping[str, Any], token: str, profile: Mapping[s
             "repository": full_name,
             "default_branch": default_branch,
             "mandatory_check_names": profile.get("mandatory_check_names") or [],
+            "check_producers": profile.get("check_producers") or {},
+            "required_security_evidence": profile.get("required_security_evidence") or [],
             "human_review_labels": profile.get("human_review_labels") or list(HOLD_LABELS_FALLBACK),
             "updater_identities": profile.get("updater_identities") or {},
             "allowed_merge_method": profile.get("allowed_merge_method") or "squash",

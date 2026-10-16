@@ -65,12 +65,30 @@ def _snapshot(**overrides):
         "files": [{"filename": "requirements.txt", "patch": "-aiohttp==3.14.4\n+aiohttp==3.14.5\n"}],
         "reviews": [],
         "legacy_statuses": [],
+        # The producer binding is part of a well-formed snapshot: without it the
+        # gate fail-closes, which is the point of the new check.
+        "producer_evidence": {
+            "application": {
+                "workflow": ".github/workflows/ci.yml",
+                "job": "application",
+                "run_id": 38830784916,
+                "job_id": 116749043297,
+                "run_attempt": 1,
+                "head_sha": SHA,
+                "conclusion": "success",
+            }
+        },
+        "security_evidence": {},
         "risk": {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"},
         "variables": {"AUTO_MERGE_DEPENDABOT": "yes", "AUTO_MERGE_PYTHON_BUMP": "yes"},
         "policy": {
             "repository": "uesu/News-Express",
             "default_branch": "main",
             "mandatory_check_names": ["application"],
+            "check_producers": {
+                "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+            },
+            "required_security_evidence": [],
             "human_review_labels": ["review-required", "do-not-merge", "hold"],
             "updater_identities": {
                 "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
@@ -1181,6 +1199,253 @@ class ReleaseAgeAuthorityTests(unittest.TestCase):
         self.assertEqual(state2, "cache")
         self.assertEqual(first, second)
         self.assertEqual(len(calls), 1, "the cached lookup must not hit the network")
+
+
+class CheckProducerBindingTests(unittest.TestCase):
+    """A familiar check name is not proof of which workflow produced it."""
+
+    APPROVED = {
+        "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+    }
+
+    def _evidence(self, **overrides):
+        base = {
+            "workflow": ".github/workflows/ci.yml",
+            "job": "application",
+            "run_id": 1,
+            "job_id": 2,
+            "run_attempt": 1,
+            "head_sha": SHA,
+            "conclusion": "success",
+        }
+        base.update(overrides)
+        return {"application": base}
+
+    _UNSET = object()
+
+    def _verify(self, evidence, producers=_UNSET, expected=("application",)):
+        return maintenance.verify_check_producers(
+            evidence,
+            expected_names=list(expected),
+            head_sha=SHA,
+            producers=self.APPROVED if producers is self._UNSET else producers,
+        )
+
+    def test_an_approved_producer_is_verified(self):
+        self.assertEqual(self._verify(self._evidence())["state"], "ready")
+
+    def test_every_gap_blocks(self):
+        cases = {
+            "wrong workflow": self._evidence(workflow=".github/workflows/evil.yml"),
+            "wrong job": self._evidence(job="something-else"),
+            "wrong head": self._evidence(head_sha=SHA2),
+            "evidence unavailable": {"application": {"error": "job-api:403"}},
+            "evidence absent": {},
+        }
+        for label, evidence in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(self._verify(evidence)["state"], "failed", label)
+
+    def test_a_gate_with_no_approved_producer_blocks(self):
+        # No trusted statement of who may produce a gate means nobody has said it
+        # is safe, so the name alone cannot authorise a merge.
+        result = self._verify(self._evidence(), expected=("application", "mystery"))
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["reason"], "no-approved-producer:mystery")
+
+    def test_no_producer_policy_at_all_blocks(self):
+        self.assertEqual(
+            self._verify(self._evidence(), producers={})["reason"],
+            "no-approved-producers-configured",
+        )
+
+    def test_details_url_from_another_repository_is_not_an_identity(self):
+        foreign = "https://github.com/evil/other/actions/runs/1/job/2"
+        self.assertIsNone(
+            maintenance.parse_check_run_identity(foreign, "uesu/News-Express")
+        )
+
+    def test_unparseable_details_url_is_not_an_identity(self):
+        for url in ("", "https://example.com/runs/1/job/2", "not a url"):
+            with self.subTest(url=url):
+                self.assertIsNone(
+                    maintenance.parse_check_run_identity(url, "uesu/News-Express")
+                )
+
+    def test_a_same_named_check_from_a_foreign_workflow_blocks_the_merge(self):
+        snapshot = _snapshot(
+            producer_evidence={
+                "application": {
+                    "workflow": ".github/workflows/not-ci.yml",
+                    "job": "application",
+                    "run_id": 1, "job_id": 2, "run_attempt": 1,
+                    "head_sha": SHA, "conclusion": "success",
+                }
+            }
+        )
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "unapproved-producer-workflow:application")
+
+    def test_missing_producer_evidence_blocks_the_merge(self):
+        decision = maintenance.decide_merge(_snapshot(producer_evidence={}))
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "missing-producer-evidence:application")
+
+
+class SecurityEvidenceTests(unittest.TestCase):
+    """Scan outcomes are separate evidence; unavailable is not clean."""
+
+    def test_open_findings_block(self):
+        result = maintenance.verify_security_evidence(
+            {"code-scanning": {"state": "ok", "open": 3}}, ["code-scanning"]
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["reason"], "unresolved-code-scanning-alerts:3")
+
+    def test_unavailable_evidence_defers_rather_than_passing(self):
+        for state in ("unavailable", "not-enabled", "malformed", "unknown-kind"):
+            with self.subTest(state=state):
+                result = maintenance.verify_security_evidence(
+                    {"code-scanning": {"state": state}}, ["code-scanning"]
+                )
+                self.assertEqual(result["state"], "defer", state)
+                self.assertNotEqual(result["state"], "ready")
+
+    def test_evidence_never_collected_defers(self):
+        result = maintenance.verify_security_evidence({}, ["secret-scanning"])
+        self.assertEqual(result["state"], "defer")
+        self.assertEqual(result["reason"], "security-evidence-missing:secret-scanning")
+
+    def test_clean_scans_are_ready(self):
+        result = maintenance.verify_security_evidence(
+            {"code-scanning": {"state": "ok", "open": 0}}, ["code-scanning"]
+        )
+        self.assertEqual(result["state"], "ready")
+
+    def test_unresolved_findings_block_the_merge(self):
+        snapshot = _snapshot(
+            security_evidence={"code-scanning": {"state": "ok", "open": 2}},
+        )
+        snapshot["policy"]["required_security_evidence"] = ["code-scanning"]
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "unresolved-code-scanning-alerts:2")
+
+    def test_denied_scan_api_defers_the_merge(self):
+        # The real runtime token is denied these endpoints (HTTP 403). That is
+        # unavailable evidence, and it must defer rather than read as clean.
+        snapshot = _snapshot(
+            security_evidence={"code-scanning": {"state": "unavailable", "detail": "http:403"}},
+        )
+        snapshot["policy"]["required_security_evidence"] = ["code-scanning"]
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "defer")
+        self.assertIn("security-evidence-unavailable", decision.reason)
+
+
+class LiveProducerCollectionTests(unittest.TestCase):
+    """The adapter must actually collect producer evidence, not assume it."""
+
+    EVENT = {
+        "repository": {"full_name": "acme/app", "default_branch": "main"},
+        "pull_request": {"number": 12, "head": {"sha": SHA}},
+    }
+    PROFILE = {
+        "mandatory_check_names": ["application"],
+        "check_producers": {
+            "application": {"workflow": ".github/workflows/ci.yml", "job": "application"},
+        },
+        "dependabot_allowed_files": ["requirements.txt", "requirements.in"],
+        "updater_identities": {
+            "dependabot": {"login": "dependabot[bot]", "auto_merge_var": "AUTO_MERGE_DEPENDABOT"},
+        },
+    }
+    FILES = [{"filename": "requirements.txt", "patch": "-aiohttp==3.14.4\n+aiohttp==3.14.5\n"}]
+    CHECK = {
+        "id": 1, "name": "application", "head_sha": SHA, "status": "completed",
+        "conclusion": "success", "app": {"slug": "github-actions"},
+        "details_url": "https://github.com/acme/app/actions/runs/77/job/88",
+    }
+
+    def _run(self, responder):
+        original = maintenance._github_json
+        maintenance._github_json = responder
+        try:
+            return maintenance.build_live_snapshot(self.EVENT, "token", self.PROFILE)
+        finally:
+            maintenance._github_json = original
+
+    def _responder(self, *, job_status=200, run_status=200, workflow=".github/workflows/ci.yml"):
+        def responder(url, *a, **k):
+            if "/actions/jobs/88" in url:
+                return job_status, {"name": "application", "head_sha": SHA, "conclusion": "success"}
+            if "/actions/runs/77" in url:
+                return run_status, {"path": workflow, "head_sha": SHA, "run_attempt": 1}
+            if "/pulls/12/files" in url:
+                return 200, []
+            if "/pulls/12/reviews" in url:
+                return 200, []
+            if "/check-runs" in url:
+                return 200, {"check_runs": [self.CHECK], "total_count": 1}
+            if url.endswith("/status"):
+                return 200, {"state": "success", "statuses": []}
+            if url.endswith("/pulls/12"):
+                return 200, _pr()
+            return 404, {}
+        return responder
+
+    def test_producer_evidence_is_resolved_from_the_check_run(self):
+        result = self._run(self._responder())
+        self.assertIsInstance(result, dict)
+        evidence = result["producer_evidence"]["application"]
+        self.assertEqual(evidence["workflow"], ".github/workflows/ci.yml")
+        self.assertEqual(evidence["job"], "application")
+        self.assertEqual((evidence["run_id"], evidence["job_id"]), (77, 88))
+        self.assertEqual(evidence["head_sha"], SHA)
+
+    def test_a_denied_jobs_api_is_recorded_as_unavailable(self):
+        result = self._run(self._responder(job_status=403))
+        self.assertEqual(
+            result["producer_evidence"]["application"], {"error": "job-api:403"}
+        )
+
+    def test_a_check_from_another_repository_is_not_resolved(self):
+        foreign = dict(self.CHECK, details_url="https://github.com/evil/other/actions/runs/1/job/2")
+        original = self.CHECK
+        type(self).CHECK = foreign
+        try:
+            result = self._run(self._responder())
+        finally:
+            type(self).CHECK = original
+        self.assertEqual(
+            result["producer_evidence"]["application"],
+            {"error": "unresolvable-details-url"},
+        )
+
+    def test_resolved_producer_flows_through_to_a_merge_decision(self):
+        snapshot = self._run(self._responder())
+        # Bind the fixture PR to the same repository the adapter used.
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(head_repo="acme/app", base_repo="acme/app", sha=SHA)
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"}
+        snapshot["variables"] = {"AUTO_MERGE_DEPENDABOT": "yes"}
+        snapshot["files"] = self.FILES
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "merge", decision.reason)
+
+    def test_a_foreign_producer_workflow_blocks_the_live_path(self):
+        snapshot = self._run(self._responder(workflow=".github/workflows/evil.yml"))
+        snapshot["repository"] = "acme/app"
+        snapshot["policy"]["repository"] = "acme/app"
+        snapshot["pull_request"] = _pr(head_repo="acme/app", base_repo="acme/app", sha=SHA)
+        snapshot["files"] = self.FILES
+        snapshot["risk"] = {"risk": "routine", "auto_eligible": True, "reason": "package-patch-or-minor"}
+        snapshot["variables"] = {"AUTO_MERGE_DEPENDABOT": "yes"}
+        decision = maintenance.decide_merge(snapshot)
+        self.assertEqual(decision.action, "fail")
+        self.assertEqual(decision.reason, "unapproved-producer-workflow:application")
 
 
 if __name__ == "__main__":

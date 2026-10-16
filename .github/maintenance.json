@@ -27,7 +27,7 @@
     "maintenance-ci"
   ],
   "final_gate": "maintenance-ci",
-  "ci_workflow_name": "CI \u2014 syntax + offline smoke test",
+  "ci_workflow_name": "CI — syntax + offline smoke test",
   "test_commands": {
     "compile": [
       "python",
@@ -215,5 +215,29 @@
   ],
   "dependabot_allowed_directories": [
     ".github/workflows/"
-  ]
+  ],
+  "check_producers": {
+    "application": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "application"
+    },
+    "maintenance": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "maintenance"
+    },
+    "lock-consistency": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "lock-consistency"
+    },
+    "workflow-security": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "workflow-security"
+    },
+    "maintenance-ci": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "maintenance-ci"
+    }
+  },
+  "required_security_evidence": [],
+  "security_evidence_note": "Kinds the merge controller must retrieve real findings for before merging. Empty because the runtime token is denied code-scanning and secret-scanning (HTTP 403), so no scan outcome can be read; unavailable evidence defers rather than reading as clean. Grant the scope, then list the kinds here."
 }

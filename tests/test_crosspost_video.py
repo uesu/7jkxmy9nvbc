@@ -21,7 +21,7 @@ except ImportError:
     sys.modules["feedparser"].parse = lambda *a, **k: None
     sys.modules["dotenv"].load_dotenv = lambda *a, **k: None
 
-import importlib.util
+import importlib.util  # noqa: E402
 
 
 def load(name: str, rel: str):
