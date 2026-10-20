@@ -1,10 +1,10 @@
 {
-  "ts": 1792487725,
+  "ts": 1792488032,
   "post": "HonkaiStarRail_leaks/1whbjbh",
   "services": {
     "redditez": {
-      "ok": false,
-      "detail": "no usable data"
+      "ok": true,
+      "detail": "1 media item(s)"
     },
     "vxreddit": {
       "ok": true,
