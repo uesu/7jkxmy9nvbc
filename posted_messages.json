@@ -1,1 +1,83 @@
-{}
+{
+  "WutheringWavesLeaks_1xjd85y": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1xjd85y/38_updated_buffs_for_the_new_somnoire_event_via/",
+    "delivered_at": 1793361322,
+    "published_ts": 1793361034,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [3.8 | Updated buffs for the New Somnoire Event via Gamedata](https://www.reddit.com/r/WutheringWavesLeaks/comments/1xjd85y/38_updated_buffs_for_the_new_somnoire_event_via/)\n*by Delumenum in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 10,
+              "content": "Wuthering Waves \u2014 V2 Version Changes to Dreamland Exploration\n\n**1. Stage Buff Adjustments**\n\nEvolutionary Monument Stage Buff:\n\n* When triggering a Dodge Counter or a successful counterattack against an enemy's attack, time stops for 0.8 seconds.\n\n* Successfully dodging an attack additionally stops time for 2 seconds.\n\n* When Crownless takes damage while airborne, time stops for 1 second and Crownless gains the Staggered effect. Each stack increases the final damage taken by Crownless by 1%. This effect can stack once every 0.2 seconds, up to 100 stacks.\n\n* While Crownless is on the ground, 1 stack of Staggered is removed every 2 \u2192 5 seconds.\n\n**2. Character Ability Adjustments**\n\n**Jinhsi**\n\nLv. 1 \u2014 New Effect:\n\n**- The final damage dealt by Resonance Skill: Crescent Divinity is increased by 50.**\n\nEffect Adjustment:\n\n* Each Thunderstrike deals Spectro DMG equal to 686.46% of Jinhsi's ATK.\n\n* Each Timequake deals Spectro DMG equal to 68.64% of Jinhsi's ATK.\n\n**Camellya**\n\nLv. 1 \u2014 Effect Adjustment:\n\n**Camellya's final damage is increased by 150%.**\n\nForte Circuit: Ephemeral\n\n* The cooldown of Forte Circuit: Ephemeral is reduced to 16 seconds.\n\n* Casting Forte Circuit: Ephemeral or Forte Circuit: Perennial no longer causes Camellya to enter Budding Mode.\n\n* When Camellya enters Full Bloom Mode, she can immediately enter Budding Mode and consume all Crimson Buds. Each Crimson Bud consumed additionally increases the DMG Multiplier bonus granted by Sweet Dream by 5%, up to an additional 50%.\n\n* Consuming all Crimson Pistils no longer ends Budding Mode.\n\n* When exiting Full Bloom Mode, Camellya can immediately exit Budding Mode.\n\n* For a certain period after casting Forte Circuit: Ephemeral, Forte Circuit: Perennial, Resonance Skill: Floral Ravage, or Resonance Skill: Dark Pistil Hunt, pressing the Basic Attack button allows Camellya to perform Basic Attack Stage 4.\n\nWhen Camellya is not in Full Bloom Mode, she gains the following effect:\n\n* Hitting an enemy with an attack grants Disorder Spread. This effect can be triggered once every 0.5 seconds.\n\n* Disorder Spread lasts for 15 seconds and can stack up to 10 times.\n\n* Upon reaching 10 stacks of Disorder Spread, all stacks are consumed and Resonance Skill: Floral Convergence is unlocked for 15 seconds.\n\n* During this period, Camellya cannot gain Disorder Spread. Tapping the Resonance Skill button allows her to cast Resonance Skill: Floral Convergence.\n\n* If Camellya is currently in Full Bloom Mode, casting this skill will end Full Bloom Mode.\n\n* Casting Floral Convergence restores 100 Crimson Pistils and deals Havoc DMG equal to 80% of the DMG Multiplier of Forte Circuit: Ephemeral. This damage is considered Basic Attack DMG.\n\n* Resonance Skill: Floral Convergence has a cooldown of 4 seconds.\n\nWhile Camellya is in Full Bloom Mode, she gains the following effects:\n\n* If Camellya is the active Resonator, she gains 1 stack of Frenzy every 0.2 seconds. Upon reaching 10 stacks, all Frenzy stacks are removed and 1 second is deducted from the stage timer.\n\n* The final damage dealt by the following attacks is increased by 150%:\n\n* Basic Attack: Vining Waltz\n\n* Basic Attack: Blazing Waltz\n\n* Dodge Counter: Atonement\n\n* Resonance Skill: Crimson Blossom\n\n* Casting an Intro Skill grants 100 Concerto Energy and increases Sweet Dream's DMG Multiplier bonus to its maximum value.\n\n* Basic Attack: Vining Waltz Stage 3 and Basic Attack: Blazing Waltz can pull nearby enemies towards Camellya, and their attack range is increased."
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 4 \ud83d\udc4d 7   \u2022   \ud83d\udd50 <t:1793361034:f> \u2022 \ud83d\udcdc Page 1/2"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1xjd85y/38_updated_buffs_for_the_new_somnoire_event_via/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "continuations": [],
+    "continuation_next": 1,
+    "message_ids": [
+      "1565695710748483616",
+      "1565695712786784387"
+    ],
+    "last_checked": 1793361347.4282153,
+    "message_id": "1565695710748483616",
+    "continuation_completed_at": 1793361347.428262
+  }
+}
