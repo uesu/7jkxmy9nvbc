@@ -9,7 +9,7 @@
   },
   "AnantaLeaks_1xjdnaq": {
     "first_seen": 1793362527.2963254,
-    "last_checked": 1793362527.2963254,
+    "last_checked": 1793363124.0594358,
     "reason": "not_live",
     "source": "arctic",
     "title": "At\u00e9 onde vai o fan service do jogo?",
@@ -41,7 +41,7 @@
   },
   "Genshin_Impact_Leaks_1xjdo12": {
     "first_seen": 1793362527.2963254,
-    "last_checked": 1793362527.2963254,
+    "last_checked": 1793363124.0594358,
     "reason": "liveness_removed",
     "source": "arctic",
     "title": "The Harbor That Never Freezes",
@@ -86,6 +86,14 @@
     "source": "rss",
     "title": "Version 4.7 Trailer: \"Now, Lay Laughter to All Stars\" | Honkai: Star Rail",
     "published_ts": 1793362529
+  },
+  "HonkaiStarRail_leaks_1xjdv7f": {
+    "first_seen": 1793363124.0594358,
+    "last_checked": 1793363124.0594358,
+    "reason": "liveness_removed",
+    "source": "rss",
+    "title": "Version 4.7 Bonuses Available!",
+    "published_ts": 1793362847
   },
   "WutheringWavesLeaks_1xivgx5": {
     "first_seen": 1793306726.0931568,
