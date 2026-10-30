@@ -57,7 +57,7 @@
   },
   "HonkaiStarRail_leaks_1xjdkwf": {
     "first_seen": 1793362229.5947912,
-    "last_checked": 1793386230.5859146,
+    "last_checked": 1793386841.3370655,
     "reason": "liveness_removed",
     "source": "arctic",
     "title": "New Aha skin",
@@ -185,9 +185,9 @@
   },
   "Zenlesszonezeroleaks__1xjnk50": {
     "first_seen": 1793385629.1880784,
-    "last_checked": 1793386230.5859146,
-    "reason": "liveness_removed",
-    "source": "rss",
+    "last_checked": 1793386841.3370655,
+    "reason": "removal_notice",
+    "source": "arctic",
     "title": "Latest revelations from Tieba\uff08Highly credible CN whistleblower\uff09",
     "published_ts": 1793385452,
     "rss_seen": 0
