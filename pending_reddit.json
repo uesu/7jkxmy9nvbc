@@ -57,7 +57,7 @@
   },
   "HonkaiStarRail_leaks_1xjdkwf": {
     "first_seen": 1793362229.5947912,
-    "last_checked": 1793385035.1704683,
+    "last_checked": 1793385629.1880784,
     "reason": "liveness_removed",
     "source": "arctic",
     "title": "New Aha skin",
@@ -174,5 +174,21 @@
     "source": "arctic",
     "title": "\u6765\u81eaTieba\u7684\u6700\u65b0\u7206\u6599\u6d88\u606f",
     "published_ts": 1793385075
+  },
+  "Zenlesszonezeroleaks__1xjnik8": {
+    "first_seen": 1793385629.1880784,
+    "last_checked": 1793385629.1880784,
+    "reason": "removal_notice",
+    "source": "arctic",
+    "title": "Latest revelations from Tieba\uff08Highly credible CN whistleblower\uff09",
+    "published_ts": 1793385350
+  },
+  "Zenlesszonezeroleaks__1xjnk50": {
+    "first_seen": 1793385629.1880784,
+    "last_checked": 1793385629.1880784,
+    "reason": "removal_notice",
+    "source": "arctic",
+    "title": "Latest revelations from Tieba\uff08Highly credible CN whistleblower\uff09",
+    "published_ts": 1793385452
   }
 }
