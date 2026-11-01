@@ -47,22 +47,6 @@
     "title": "Mitya and Lisa Plunge SFX Comparison",
     "published_ts": 1793405738
   },
-  "HonkaiStarRail_leaks_1xjdd2p": {
-    "first_seen": 1793361640.0891647,
-    "last_checked": 1793361640.0891647,
-    "reason": "removal_notice",
-    "source": "arctic",
-    "title": "Aeon Aha Lotto Goddess Skin Reveal",
-    "published_ts": 1793361448
-  },
-  "HonkaiStarRail_leaks_1xjde36": {
-    "first_seen": 1793361640.0891647,
-    "last_checked": 1793361640.0891647,
-    "reason": "removal_notice",
-    "source": "arctic",
-    "title": "Event Wrap Banners part 1 and Part 2",
-    "published_ts": 1793361524
-  },
   "HonkaiStarRail_leaks_1xjdkwf": {
     "first_seen": 1793362229.5947912,
     "last_checked": 1793398233.9305716,
@@ -223,5 +207,13 @@
     "source": "arctic",
     "title": "Baja d baja",
     "published_ts": 1793512559
+  },
+  "Zenlesszonezeroleaks__1xl11ms": {
+    "first_seen": 1793534437.7959154,
+    "last_checked": 1793534437.7959154,
+    "reason": "removal_notice",
+    "source": "arctic",
+    "title": "[ZZZ 3.4] Kafka raw animations (not all animations are available on this beta) via Hiragara",
+    "published_ts": 1793533547
   }
 }
