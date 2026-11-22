@@ -105,7 +105,7 @@
   "WutheringWavesLeaks_1y2dxhl": {
     "subreddit": "WutheringWavesLeaks",
     "path": "/r/WutheringWavesLeaks/comments/1y2dxhl/wuthering_waves_4x_official_interview/",
-    "delivered_at": 1795314638,
+    "delivered_at": 1795320657,
     "published_ts": 1795313781,
     "payload": {
       "flags": 32768,
@@ -120,12 +120,98 @@
             },
             {
               "type": 10,
-              "content": "I advise people to read this article cause it has a lot of insight to wuthering waves development and 4.x itself especially surrounding story stuff as well\n\n**Exclusive Interview with Kuro Games: Wuthering Waves Chooses a \"Hell Mode Start\" for 2027** By Qiuqiu\n\n**\"If the mountain will not come to me, then I shall go to the mountain.\"**\n\nAs the end of the year approaches, you can almost smell the tension building for the upcoming battle among Chinese anime-style games. Take a closer look, and you'll find that every publisher is already preparing for the competition. High-quality games of various genres are lining up for release, while established live-service titles aren't slowing down either, with major version updates, collaborations, and crossover content arriving one after another.\n\nAnd now, on November 21, Wuthering Waves has released a gameplay preview for its annual story chapter, Wuthering Waves: Embers of the Everbright.\n\nUnlike previous versions, which explored Chinese-inspired and classical themes, the opening of the New Federation storyline takes a Western-inspired direction. The new region features a more distinctive landscape, and, for the first time, introduces an entirely new mecha-based 3C experience that is closely integrated with the map and gameplay.\n\n![gif](hvsluodja23i1)\n\n![gif](h1wznzzna23i1)\n\nFor Wuthering Waves players, mechs aren't exactly unfamiliar. After all, I previously brought you the first hands-on look at the \"one-handed mech\" back in Version 3.3. Whether it was the massive mech used by the Exostrider or the mech belonging to the protagonist's villainous counterpart, Singulorum, both left plenty of players eager to see these concepts become actual gameplay features.\n\n![gif](u3mixqpsa23i1)\n\n![gif](gqm0lmcva23i1)\n\nWell, now Kuro has done more than simply make mechs a reality. It has turned them into an open-world vehicle system available to everyone. They have abilities, can fight, and can assist players in combat. Their appearance also bears a striking resemblance to Singulorum's mech, and they come with dedicated themed gameplay.\n\n![gif](o23i6jyya23i1)\n\n![img](pshfucm0b23i1)\n\nWhat was once a showcase of technical ambition has now become a core part of the new version's gameplay.\n\nOn November 18, Kuro also released a specially produced 2D frame-by-frame animated teaser, revealing seven new characters in one go. The short animation showcased the New Federation's story, environments, and characters, while incorporating comic-book halftone shading, pop-art color blocks, and a vintage print aesthetic.\n\n![gif](qupmckzib23i1)\n\n![gif](onwbup5kb23i1)\n\nJust looking at the art style might leave you wondering: Is this really Wuthering Waves? Yes, this is Wuthering Waves: Embers of the Everbright\n\nThat's right. For the first time, Kuro has introduced an annual story chapter title that will run throughout the year: Embers of the Everbright. As I write this article, it seems that the familiar 1.X, 2.X, and 3.X numbering system we've used to describe the different eras of Wuthering Waves may be coming to an end. The New Federation's story and content will also have a much more distinctive annual theme.\n\n![gif](n6agdmavb23i1)"
+              "content": "I advise people to read this article cause it has a lot of insight to wuthering waves development and 4.x itself especially surrounding story stuff as well\n\n**Exclusive Interview with Kuro Games: Wuthering Waves Chooses a \"Hell Mode Start\" for 2027** By Qiuqiu\n\n**\"If the mountain will not come to me, then I shall go to the mountain.\"**\n\nAs the end of the year approaches, you can almost smell the tension building for the upcoming battle among Chinese anime-style games. Take a closer look, and you'll find that every publisher is already preparing for the competition. High-quality games of various genres are lining up for release, while established live-service titles aren't slowing down either, with major version updates, collaborations, and crossover content arriving one after another.\n\nAnd now, on November 21, Wuthering Waves has released a gameplay preview for its annual story chapter, Wuthering Waves: Embers of the Everbright.\n\nUnlike previous versions, which explored Chinese-inspired and classical themes, the opening of the New Federation storyline takes a Western-inspired direction. The new region features a more distinctive landscape, and, for the first time, introduces an entirely new mecha-based 3C experience that is closely integrated with the map and gameplay."
             },
             {
-              "type": 14,
-              "divider": true,
-              "spacing": 1
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/hvsluodja23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/h1wznzzna23i1.gif"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "For Wuthering Waves players, mechs aren't exactly unfamiliar. After all, I previously brought you the first hands-on look at the \"one-handed mech\" back in Version 3.3. Whether it was the massive mech used by the Exostrider or the mech belonging to the protagonist's villainous counterpart, Singulorum, both left plenty of players eager to see these concepts become actual gameplay features."
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/u3mixqpsa23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/gqm0lmcva23i1.gif"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "Well, now Kuro has done more than simply make mechs a reality. It has turned them into an open-world vehicle system available to everyone. They have abilities, can fight, and can assist players in combat. Their appearance also bears a striking resemblance to Singulorum's mech, and they come with dedicated themed gameplay."
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/o23i6jyya23i1.gif"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "![img](pshfucm0b23i1)\n\nWhat was once a showcase of technical ambition has now become a core part of the new version's gameplay.\n\nOn November 18, Kuro also released a specially produced 2D frame-by-frame animated teaser, revealing seven new characters in one go. The short animation showcased the New Federation's story, environments, and characters, while incorporating comic-book halftone shading, pop-art color blocks, and a vintage print aesthetic."
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/qupmckzib23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/onwbup5kb23i1.gif"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "Just looking at the art style might leave you wondering: Is this really Wuthering Waves? Yes, this is Wuthering Waves: Embers of the Everbright\n\nThat's right. For the first time, Kuro has introduced an annual story chapter title that will run throughout the year: Embers of the Everbright. As I write this article, it seems that the familiar 1.X, 2.X, and 3.X numbering system we've used to describe the different eras of Wuthering Waves may be coming to an end. The New Federation's story and content will also have a much more distinctive annual theme."
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/n6agdmavb23i1.gif"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "Looking back at Version 2.0, then 3.0, and now 4.0, Kuro appears to be charging ahead with increasingly ambitious changes, repeatedly rebuilding the game's underlying systems. Doing this once or twice could be considered bold. But when an entire series of major updates follows the same approach, it raises an interesting question: Has Kuro developed a mature product strategy built around becoming more ambitious the longer the game operates?"
             },
             {
               "type": 12,
@@ -139,12 +225,62 @@
                   "media": {
                     "url": "https://preview.redd.it/pshfucm0b23i1.jpeg?width=1073&format=pjpg&auto=webp&s=c0aae52c5e00523b9d9d1b589560809cbfe163b3"
                   }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/wsucv87ec23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/893u355ee23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/kjm7p5ppe23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/amk5p22ze23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/1rwgqkanf23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/n5hmvrh1g23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/6pb72qh9g23i1.gif"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/bdluzv77h23i1.gif"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/rcowo90yh23i1.gif"
+                  }
                 }
               ]
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 6 \ud83d\udc4d 32   \u2022   \ud83d\udd50 <t:1795313781:f> \u2022 \ud83d\udcdc Page 1/8"
+              "content": "-# \ud83d\udcac 41 \ud83d\udc4d 188   \u2022   \ud83d\udd50 <t:1795313781:f> \u2022 \ud83d\udcdc Page 1/8"
             },
             {
               "type": 14,
@@ -200,19 +336,19 @@
     "continuations": [],
     "continuation_next": 7,
     "message_ids": [
-      "1573888434731225302",
-      "1573888436757074004",
-      "1573888442205474818",
-      "1573888447989551219",
-      "1573888454704635977",
-      "1573888461096882198",
-      "1573888468306886837",
-      "1573888473725931654"
+      "1573913671426383894",
+      "1573913677046747227",
+      "1573913682075717725",
+      "1573913688052600853",
+      "1573913693866033297",
+      "1573913699566092400",
+      "1573913705081475093",
+      "1573913711616458843"
     ],
-    "last_checked": 1795314653.9737015,
-    "message_id": "1573888434731225302",
+    "last_checked": 1795320671.2236083,
+    "message_id": "1573913671426383894",
     "relay_auto_edit": true,
     "relay_revision": 2,
-    "continuation_completed_at": 1795314653.9737806
+    "continuation_completed_at": 1795320671.2237165
   }
 }
