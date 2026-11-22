@@ -311,6 +311,100 @@
     "relay_revision": 2,
     "continuation_completed_at": 1795326688.8121986
   },
+  "WutheringWavesLeaks_1y2j2ex": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y2j2ex/40_possible_new_sonata_sets_bonus_via_team/",
+    "message_id": "1573958852838424647",
+    "delivered_at": 1795331429,
+    "published_ts": 1795330976,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | Possible new sonata sets bonus via Team Gemberry78](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y2j2ex/40_possible_new_sonata_sets_bonus_via_team/)\n*by Shirasaki- in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 10,
+              "content": "WW 4.0Beta\n\n\u8840\u68d8\u6743\u6b32\u4e4b\u8def\n\n\u89d2\u8272\u4e3a\u654c\u4eba\u6dfb\u52a0\u3010\u6052\u8c10\u00b7\u504f\u79fb\u3011\u65f6\uff0c\u83b7\u5f97\u65bd\u653e\u5ef6\u594f\u6280\u80fd\u540e\u4f7f\u4e0b\u4e00\u4e2a\u767b\u573a\u7684\u89d2\u8272\u653b\u51fb\u63d0\u5347\u7684\u6548\u679c\uff0c\u82e5\u5207\u6362\u81f3\u5176\u4ed6\u89d2\u8272\u5219\u8be5\u6548\u679c\u63d0\u524d\u7ed3\u675f\u3002\n\nWW 4.0Beta\n\n\u5fc3\u6000\u660e\u65e5\u4e4b\u8a93\n\n\u89d2\u8272\u5728\u4e00\u5b9a\u65f6\u95f4\u5185\u63d0\u4f9b\u6cbb\u7597\u548c\u6263\u9664\u81ea\u8eab\u751f\u547d\u65f6\uff0c\u4f7f\u961f\u4f0d\u4e2d\u89d2\u8272\u5168\u5c5e\u6027\u4f24\u5bb3\u63d0\u5347\u3002\n\nvia gemberry\n\nMTL:\n\nWW 4.0 Beta\n\nPath of Bloodthorns and Ambition\n\nWhen the character inflicts \\[Tune Constant - Shifting\\] on enemies, they gain the following effect: after casting an Outro Skill, the next character to take the field gains increased ATK. Switching to a different character ends this effect early.\n\nWW 4.0 Beta\n\nVow of Tomorrow\n\nWhen the character provides healing and consumes their own HP within a certain duration, all characters in the team gain increased All-Attribute DMG.\n\nPS : i tagged this thread as speculation because Team gemberry78 didnt specify this about whether this is new tune mechanic or character kits, but today's post made me thinking these might be sonata sets instead."
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/r1a4wev7443i1.jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 16 \ud83d\udc4d 21   \u2022   \ud83d\udd50 <t:1795330976:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y2j2ex/40_possible_new_sonata_sets_bonus_via_team/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
   "Zenlesszonezeroleaks__1y2gfd5": {
     "subreddit": "Zenlesszonezeroleaks_",
     "path": "/r/Zenlesszonezeroleaks_/comments/1y2gfd5/happy_birthday_seed_one_more/",
