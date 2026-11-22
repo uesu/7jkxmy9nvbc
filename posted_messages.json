@@ -105,7 +105,7 @@
   "WutheringWavesLeaks_1y2dxhl": {
     "subreddit": "WutheringWavesLeaks",
     "path": "/r/WutheringWavesLeaks/comments/1y2dxhl/wuthering_waves_4x_official_interview/",
-    "delivered_at": 1795320657,
+    "delivered_at": 1795326676,
     "published_ts": 1795313781,
     "payload": {
       "flags": 32768,
@@ -129,7 +129,12 @@
                   "media": {
                     "url": "https://i.redd.it/hvsluodja23i1.gif"
                   }
-                },
+                }
+              ]
+            },
+            {
+              "type": 12,
+              "items": [
                 {
                   "media": {
                     "url": "https://i.redd.it/h1wznzzna23i1.gif"
@@ -148,7 +153,12 @@
                   "media": {
                     "url": "https://i.redd.it/u3mixqpsa23i1.gif"
                   }
-                },
+                }
+              ]
+            },
+            {
+              "type": 12,
+              "items": [
                 {
                   "media": {
                     "url": "https://i.redd.it/gqm0lmcva23i1.gif"
@@ -171,20 +181,11 @@
               ]
             },
             {
-              "type": 10,
-              "content": "![img](pshfucm0b23i1)\n\nWhat was once a showcase of technical ambition has now become a core part of the new version's gameplay.\n\nOn November 18, Kuro also released a specially produced 2D frame-by-frame animated teaser, revealing seven new characters in one go. The short animation showcased the New Federation's story, environments, and characters, while incorporating comic-book halftone shading, pop-art color blocks, and a vintage print aesthetic."
-            },
-            {
               "type": 12,
               "items": [
                 {
                   "media": {
-                    "url": "https://i.redd.it/qupmckzib23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/onwbup5kb23i1.gif"
+                    "url": "https://preview.redd.it/pshfucm0b23i1.jpeg?width=1073&format=pjpg&auto=webp&s=c0aae52c5e00523b9d9d1b589560809cbfe163b3"
                   }
                 }
               ]
@@ -195,6 +196,30 @@
           "type": 17,
           "accent_color": 16729344,
           "components": [
+            {
+              "type": 10,
+              "content": "What was once a showcase of technical ambition has now become a core part of the new version's gameplay.\n\nOn November 18, Kuro also released a specially produced 2D frame-by-frame animated teaser, revealing seven new characters in one go. The short animation showcased the New Federation's story, environments, and characters, while incorporating comic-book halftone shading, pop-art color blocks, and a vintage print aesthetic."
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/qupmckzib23i1.gif"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/onwbup5kb23i1.gif"
+                  }
+                }
+              ]
+            },
             {
               "type": 10,
               "content": "Just looking at the art style might leave you wondering: Is this really Wuthering Waves? Yes, this is Wuthering Waves: Embers of the Everbright\n\nThat's right. For the first time, Kuro has introduced an annual story chapter title that will run throughout the year: Embers of the Everbright. As I write this article, it seems that the familiar 1.X, 2.X, and 3.X numbering system we've used to describe the different eras of Wuthering Waves may be coming to an end. The New Federation's story and content will also have a much more distinctive annual theme."
@@ -214,73 +239,8 @@
               "content": "Looking back at Version 2.0, then 3.0, and now 4.0, Kuro appears to be charging ahead with increasingly ambitious changes, repeatedly rebuilding the game's underlying systems. Doing this once or twice could be considered bold. But when an entire series of major updates follows the same approach, it raises an interesting question: Has Kuro developed a mature product strategy built around becoming more ambitious the longer the game operates?"
             },
             {
-              "type": 12,
-              "items": [
-                {
-                  "media": {
-                    "url": "https://preview.redd.it/emrewkqlg23i1.jpeg?width=1080&format=pjpg&auto=webp&s=186bd231460125bcf3a6a86bb44fa6ee6dbb900b"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://preview.redd.it/pshfucm0b23i1.jpeg?width=1073&format=pjpg&auto=webp&s=c0aae52c5e00523b9d9d1b589560809cbfe163b3"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/wsucv87ec23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/893u355ee23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/kjm7p5ppe23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/amk5p22ze23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/1rwgqkanf23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/n5hmvrh1g23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/6pb72qh9g23i1.gif"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/bdluzv77h23i1.gif"
-                  }
-                }
-              ]
-            },
-            {
-              "type": 12,
-              "items": [
-                {
-                  "media": {
-                    "url": "https://i.redd.it/rcowo90yh23i1.gif"
-                  }
-                }
-              ]
-            },
-            {
               "type": 10,
-              "content": "-# \ud83d\udcac 41 \ud83d\udc4d 188   \u2022   \ud83d\udd50 <t:1795313781:f> \u2022 \ud83d\udcdc Page 1/8"
+              "content": "-# \ud83d\udcac 87 \ud83d\udc4d 266   \u2022   \ud83d\udd50 <t:1795313781:f> \u2022 \ud83d\udcdc Page 1/8"
             },
             {
               "type": 14,
@@ -336,20 +296,20 @@
     "continuations": [],
     "continuation_next": 7,
     "message_ids": [
-      "1573913671426383894",
-      "1573913677046747227",
-      "1573913682075717725",
-      "1573913688052600853",
-      "1573913693866033297",
-      "1573913699566092400",
-      "1573913705081475093",
-      "1573913711616458843"
+      "1573938911003283598",
+      "1573938914735956009",
+      "1573938921094520913",
+      "1573938927222394951",
+      "1573938933702590495",
+      "1573938940468011100",
+      "1573938946503872616",
+      "1573938952086364242"
     ],
-    "last_checked": 1795320671.2236083,
-    "message_id": "1573913671426383894",
+    "last_checked": 1795326688.812093,
+    "message_id": "1573938911003283598",
     "relay_auto_edit": true,
     "relay_revision": 2,
-    "continuation_completed_at": 1795320671.2237165
+    "continuation_completed_at": 1795326688.8121986
   },
   "Zenlesszonezeroleaks__1y2gfd5": {
     "subreddit": "Zenlesszonezeroleaks_",
