@@ -1234,13 +1234,14 @@
                 {
                   "media": {
                     "url": "https://i.redd.it/hvqtgxotq83i1.png"
-                  }
+                  },
+                  "spoiler": true
                 }
               ]
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 26 \ud83d\udc4d 24   \u2022   \ud83d\udd50 <t:1795386884:f>"
+              "content": "-# \ud83d\udcac 58 \ud83d\udc4d 94   \u2022   \ud83d\udd50 <t:1795386884:f>"
             },
             {
               "type": 14,
@@ -1294,7 +1295,13 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 1
+    "relay_revision": 2,
+    "message_ids": [
+      "1574192933035315212"
+    ],
+    "continuations": [],
+    "last_checked": 1795389027.7930977,
+    "edited_at": 1795389027.7962062
   },
   "Zenlesszonezeroleaks__1y31yis": {
     "subreddit": "Zenlesszonezeroleaks_",
@@ -1328,13 +1335,14 @@
                 {
                   "media": {
                     "url": "https://i.redd.it/ddd0xyf3r83i1.png"
-                  }
+                  },
+                  "spoiler": true
                 }
               ]
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 19 \ud83d\udc4d 36   \u2022   \ud83d\udd50 <t:1795386941:f>"
+              "content": "-# \ud83d\udcac 80 \ud83d\udc4d 96   \u2022   \ud83d\udd50 <t:1795386941:f>"
             },
             {
               "type": 14,
@@ -1388,6 +1396,12 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 1
+    "relay_revision": 2,
+    "message_ids": [
+      "1574192958842867724"
+    ],
+    "continuations": [],
+    "last_checked": 1795389028.8890378,
+    "edited_at": 1795389028.891829
   }
 }
