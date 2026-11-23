@@ -359,5 +359,84 @@
     },
     "relay_auto_edit": true,
     "relay_revision": 1
+  },
+  "Zenlesszonezeroleaks__1y3mcb4": {
+    "subreddit": "Zenlesszonezeroleaks_",
+    "path": "/r/Zenlesszonezeroleaks_/comments/1y3mcb4/footprints_story_spoilers_via_mainleakflow/",
+    "message_id": "1574459719786041346",
+    "delivered_at": 1795450846,
+    "published_ts": 1795450399,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [Footprints STORY SPOILERS via mainleakflow / keitaro_gg & @rainydasha](https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y3mcb4/footprints_story_spoilers_via_mainleakflow/)\n*by The_frost__ in r/Zenlesszonezeroleaks_*"
+            },
+            {
+              "type": 10,
+              "content": "||Footprints||\n\n||Episode 01 \u2014 The Day the Morning Star Fell||\n||Cretan Hollow||\n||Character: Ashley Dragnard||\n||Keywords: Ethereal-Slaying Katana - Tailless, Hollow Major League Competition, Outsiders, White Star Institute, Test Subjects||\n\n||Episode 02 \u2014 Sinking into the Sea of Fanatical Illusions||\n||Lemnian Hollow||\n||Character: Merrow Lamentia||\n||Keywords: Falkenhayn Mercenary Troupe, Youkai, Qingming Sword, All Becomes One, W-Engines||\n\n||Episode 03 \u2014 The Dirge for All Souls||\n||Solove Hollow||\n||Character: Rosvita Perrault||\n||Keywords: \u25a0\u25a0\u25a0\u25a0\u00b7Vike, Dark Wall, Guard of Staves, Final Frontline, Defense Force||\n||\u9632\u536b\u519b\u6307\u7684\u5176\u5b9e\u4e0d\u662f\u65b0\u827e\u5229\u90fd\u9632\u536b\u519b\uff0c\u4f46\u5e0c\u671b\u73a9\u5bb6\u8bef\u4f1a\u4ee5\u4e3a\u662f||\n||The Defense Force here is a different force, though players are meant to assume it is the New Eridu Defense Force.||\n\n||Episode 04 \u2014 Echoes of Distant Days Past||\n||Papago Hollow||\n||Character: Hyde Gardener||\n||Keywords: Joyous, Investigator's Guild, Misty Ether, Fairy, \u25a0\u25a0\u25a0\u25a0\u25a0\u25a0 Arna (the hidden word should be spelled as \"Carole\" for now)||\n\n||Episode 05 \u2014 The \u25a0\u25a0\u25a0\u25a0\u25a0\u25a0\u25a0\u25a0 of the White Castle (hidden word is \"Princess\")||\n||Pursenas Hollow||\n||Character: Lyosia Alfheim||\n||Keywords: Remielle, Prehistoric Assets, Aurora, Scions, \"Sorcery\" (refers to locals using technology without understanding it, treating it as sorcery/magic)||\n\n||Episode 06 \u2014 The \u25a0\u25a0\u25a0\u25a0\u25a0 Tower of the Skies (The redacted word refers to concepts such as \"False\" or \"Illusory\")||\n||Hive Lord Hollow||\n||Character: Leona Noctua||\n||Keywords: Sunbringer, Moon, Shelter, Project Sunseeker, Ghost||\n\n||Episode 07 \u2014 Paradise of the \u25a0\u25a0\u25a0\u25a0\u25a0\u25a0\u25a0\u25a0\u25a0 (hidden word is Faithless)||\n||Hawara Hollow||\n||Character: Lilith Antyhope||\n||Keywords: Arche, Angel, Ether, The Creator, Eclipse||\n\n||Additional names||\n||Meirz||\n||Ally||"
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 11 \ud83d\udc4d 9   \u2022   \ud83d\udd50 <t:1795450399:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y3mcb4/footprints_story_spoilers_via_mainleakflow/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
   }
 }
