@@ -644,7 +644,7 @@
             },
             {
               "type": 10,
-              "content": "WW 4.0 Beta Matrix adds new character buffs (subject to change, STC):\n\n* Zani +25% final damage\n* Ciaconna +20% final damage, after Resonance Liberation, the whole team gain +20% aero damage,\n* Carthe +25% final damage\n* Lupa +20% final damage, after Resonance Liberation, the whole team gain +20% Fusion damage,\n* Phrolova +25% final damage."
+              "content": "MTL\n\nWW 4.0 Beta Matrix adds new character buffs (subject to change, STC):\n\n* Zani +25% final damage\n* Ciaconna +20% final damage, after Resonance Liberation, the whole team gain +20% aero damage,\n* Carthe +25% final damage\n* Lupa +20% final damage, after Resonance Liberation, the whole team gain +20% Fusion damage,\n* Phrolova +25% final damage."
             },
             {
               "type": 14,
@@ -717,12 +717,12 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 2,
+    "relay_revision": 3,
     "message_ids": [
       "1574635849637961759"
     ],
     "continuations": [],
-    "last_checked": 1795493436.7526119,
-    "edited_at": 1795493436.7560573
+    "last_checked": 1795494638.905414,
+    "edited_at": 1795494638.9084065
   }
 }
