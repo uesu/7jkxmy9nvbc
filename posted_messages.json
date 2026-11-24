@@ -465,7 +465,7 @@
             },
             {
               "type": 10,
-              "content": "Translation via FS :\n\nNew Matrix Mechanism (unofficial information; subject to change):\n\nSpecial Circuit: Consume 3 5-star limited-edition characters (who must have stamina available) to gain one stack of the \"Computing Support\" buff (can be obtained a maximum of 2 times per season).\n\nComputing Support: Increases the final damage taken by enemies (does not stack with the current season's Matrix buffs)."
+              "content": "Translation via FS :\n\nNew Matrix Mechanism (unofficial information; subject to change):\n\nSpecial Circuit: Consume 3 5-star limited-edition characters (who must have stamina available) to gain one stack of the \"Computing Support\" buff (can be obtained a maximum of 2 times per season).\n\nComputing Support: Increases the final damage taken by enemies (does not stack with the current season's Matrix buffs).\n\nCN words : \u77e9\u9635\u65b0\u589e\u673a\u5236\uff08\u975e\u5b98\u65b9\u4ecb\u7ecd\uff0c\u6709\u66f4\u6539\u53ef\u80fd\uff09\uff1a \u7279\u7ea7\u56de\u8def\uff1a\u6d88\u80173\u4f4d\u62e5\u6709\u4f53\u529b\u76845\u661f\u9650\u5b9a\u89d2\u8272\u83b7\u5f97\"\u7b97\u529b\u652f\u63f4\"BUFFx1\uff08\u6bcf\u671f\u6700\u591a\u83b7\u5f972\u6b21\u7b97\u529b\u652f\u63f4\uff09\u3002 \u7b97\u529b\u652f\u63f4\uff1a\u654c\u4eba\u53d7\u5230\u6700\u7ec8\u4f24\u5bb3\u63d0\u5347\uff08\u65e0\u6cd5\u4e0e\u5f53\u671f\u77e9\u9635buff\u53e0\u52a0\uff09"
             },
             {
               "type": 14,
@@ -484,7 +484,7 @@
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 10 \ud83d\udc4d 18   \u2022   \ud83d\udd50 <t:1795508110:f>"
+              "content": "-# \ud83d\udcac 30 \ud83d\udc4d 31   \u2022   \ud83d\udd50 <t:1795508110:f>"
             },
             {
               "type": 14,
@@ -538,7 +538,13 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 1
+    "relay_revision": 2,
+    "message_ids": [
+      "1574701283099803671"
+    ],
+    "continuations": [],
+    "last_checked": 1795509037.911543,
+    "edited_at": 1795509037.9144652
   },
   "Zenlesszonezeroleaks__1y47dgb": {
     "subreddit": "Zenlesszonezeroleaks_",
