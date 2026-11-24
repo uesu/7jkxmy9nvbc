@@ -226,100 +226,6 @@
     "relay_auto_edit": true,
     "relay_revision": 1
   },
-  "HonkaiStarRail_leaks_1y41vp4": {
-    "subreddit": "HonkaiStarRail_leaks",
-    "path": "/r/HonkaiStarRail_leaks/comments/1y41vp4/v4753_rev_17279277_update_via_gachabase/",
-    "message_id": "1574618195644645398",
-    "delivered_at": 1795488629,
-    "published_ts": 1795488381,
-    "payload": {
-      "flags": 32768,
-      "components": [
-        {
-          "type": 17,
-          "accent_color": 16729344,
-          "components": [
-            {
-              "type": 10,
-              "content": "### [v4.7.53 Rev. 17279277 Update (via Gachabase)](https://www.reddit.com/r/HonkaiStarRail_leaks/comments/1y41vp4/v4753_rev_17279277_update_via_gachabase/)\n*by Gachabases in r/HonkaiStarRail_leaks*"
-            },
-            {
-              "type": 10,
-              "content": "Changelog: https://hsr.gachabase.net/changelog/beta#v4.7.53-rev-17279277\n---\n**[Characters] Astra Yao**\n\n|- **Chinese**: [Changes](https://hsr.gachabase.net/diff/characters/1515/astra-yao?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=chs) ([Full](https://hsr.gachabase.net/characters/1515/astra-yao/beta?lang=chs))\n\n|- **English**: [Changes](https://hsr.gachabase.net/diff/characters/1515/astra-yao?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=en) ([Full](https://hsr.gachabase.net/characters/1515/astra-yao/beta?lang=en))\n\n**[Characters] Ellen**\n\n|- **Chinese**: [Changes](https://hsr.gachabase.net/diff/characters/1514/ellen?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=chs) ([Full](https://hsr.gachabase.net/characters/1514/ellen/beta?lang=chs))\n\n|- **English**: [Changes](https://hsr.gachabase.net/diff/characters/1514/ellen?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=en) ([Full](https://hsr.gachabase.net/characters/1514/ellen/beta?lang=en))\n\n**[Light Cones] No Shifts on Rainy Days**\n\n|- **Chinese**: [Changes](https://hsr.gachabase.net/diff/lightcones/23066/no-shifts-on-rainy-days?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=chs) ([Full](https://hsr.gachabase.net/lightcones/23066/no-shifts-on-rainy-days/beta?lang=chs))\n\n|- **English**: [Changes](https://hsr.gachabase.net/diff/lightcones/23066/no-shifts-on-rainy-days?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=en) ([Full](https://hsr.gachabase.net/lightcones/23066/no-shifts-on-rainy-days/beta?lang=en))\n\n**[Light Cones] Shine Bright Like Her**\n\n|- **Chinese**: [Changes](https://hsr.gachabase.net/diff/lightcones/23067/shine-bright-like-her?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=chs) ([Full](https://hsr.gachabase.net/lightcones/23067/shine-bright-like-her/beta?lang=chs))\n\n|- **English**: [Changes](https://hsr.gachabase.net/diff/lightcones/23067/shine-bright-like-her?prev=beta_4.7.52_17181460&cur=beta_4.7.53_17279277&lang=en) ([Full](https://hsr.gachabase.net/lightcones/23067/shine-bright-like-her/beta?lang=en))"
-            },
-            {
-              "type": 14,
-              "divider": true,
-              "spacing": 1
-            },
-            {
-              "type": 12,
-              "items": [
-                {
-                  "media": {
-                    "url": "https://external-preview.redd.it/2WBw1KkJZuYo0aucaXzwwmR1BHXR12ILZJy3KqPXBiI.jpeg?auto=webp&s=4e1fa827a2ce9e1d13a34a77731112ba751f5082"
-                  }
-                }
-              ]
-            },
-            {
-              "type": 10,
-              "content": "-# \ud83d\udcac 11 \ud83d\udc4d 10   \u2022   \ud83d\udd50 <t:1795488381:f>"
-            },
-            {
-              "type": 14,
-              "divider": true,
-              "spacing": 1
-            },
-            {
-              "type": 1,
-              "components": [
-                {
-                  "type": 2,
-                  "style": 5,
-                  "label": "Read Post",
-                  "url": "https://www.reddit.com/r/HonkaiStarRail_leaks/comments/1y41vp4/v4753_rev_17279277_update_via_gachabase/",
-                  "emoji": {
-                    "id": "1472388018689282261",
-                    "name": "starwardhmm",
-                    "animated": true
-                  }
-                },
-                {
-                  "type": 2,
-                  "style": 5,
-                  "label": "Citlali News",
-                  "url": "https://discord.gg/HyrVP9wRXu",
-                  "emoji": {
-                    "id": "1439878792653832253",
-                    "name": "starward11",
-                    "animated": true
-                  }
-                },
-                {
-                  "type": 2,
-                  "style": 5,
-                  "label": "Donate",
-                  "url": "https://ko-fi.com/jieunlatte",
-                  "emoji": {
-                    "id": "1509026327548657914",
-                    "name": "starwardfans",
-                    "animated": true
-                  }
-                }
-              ]
-            },
-            {
-              "type": 10,
-              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
-            }
-          ]
-        }
-      ]
-    },
-    "relay_auto_edit": true,
-    "relay_revision": 1
-  },
   "HonkaiStarRail_leaks_1y42fys": {
     "subreddit": "HonkaiStarRail_leaks",
     "path": "/r/HonkaiStarRail_leaks/comments/1y42fys/aapfmoc_v2_to_v3_changes_via_nanokacc/",
@@ -539,6 +445,100 @@
     "continuations": [],
     "last_checked": 1795494638.905414,
     "edited_at": 1795494638.9084065
+  },
+  "WutheringWavesLeaks_1y47t0c": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y47t0c/40_new_matrix_mechanic_via_teamgemberry78/",
+    "message_id": "1574701283099803671",
+    "delivered_at": 1795508438,
+    "published_ts": 1795508110,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | New Matrix Mechanic via teamgemberry78](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y47t0c/40_new_matrix_mechanic_via_teamgemberry78/)\n*by Shirasaki- in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 10,
+              "content": "Translation via FS :\n\nNew Matrix Mechanism (unofficial information; subject to change):\n\nSpecial Circuit: Consume 3 5-star limited-edition characters (who must have stamina available) to gain one stack of the \"Computing Support\" buff (can be obtained a maximum of 2 times per season).\n\nComputing Support: Increases the final damage taken by enemies (does not stack with the current season's Matrix buffs)."
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/zj820oodri3i1.jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 10 \ud83d\udc4d 18   \u2022   \ud83d\udd50 <t:1795508110:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y47t0c/40_new_matrix_mechanic_via_teamgemberry78/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
   },
   "Zenlesszonezeroleaks__1y47dgb": {
     "subreddit": "Zenlesszonezeroleaks_",
