@@ -1,4 +1,94 @@
 {
+  "Genshin_Impact_Leaks_1y56hpf": {
+    "subreddit": "Genshin_Impact_Leaks",
+    "path": "/r/Genshin_Impact_Leaks/comments/1y56hpf/about_hu_tao_lantern_rite_buffs_via_uncle_purp/",
+    "message_id": "1575131560557027410",
+    "delivered_at": 1795611026,
+    "published_ts": 1795610795,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [About Hu Tao lantern rite buffs via Uncle purp](https://www.reddit.com/r/Genshin_Impact_Leaks/comments/1y56hpf/about_hu_tao_lantern_rite_buffs_via_uncle_purp/)\n*by Fun-Letterhead1329 in r/Genshin_Impact_Leaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/dge79w4s8r3i1.jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 12 \ud83d\udc4d 9   \u2022   \ud83d\udd50 <t:1795610795:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/Genshin_Impact_Leaks/comments/1y56hpf/about_hu_tao_lantern_rite_buffs_via_uncle_purp/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
   "HonkaiNexusAnimaLeaks_1xo8xhd": {
     "subreddit": "HonkaiNexusAnimaLeaks",
     "path": "/r/HonkaiNexusAnimaLeaks/comments/1xo8xhd/expected_release_date_1st_april_2027/",
