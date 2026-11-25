@@ -199,7 +199,7 @@
             },
             {
               "type": 10,
-              "content": "||full gameplay||\n\n||Are you serious metatron can summon black holes?!||\n\nSource: AstralLeaks"
+              "content": "||full gameplay\n\nAre you serious metatron can summon black holes?!\n\nSource: AstralLeaks||"
             },
             {
               "type": 14,
@@ -218,7 +218,7 @@
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 12 \ud83d\udc4d 9   \u2022   \ud83d\udd50 <t:1795626826:f>"
+              "content": "-# \ud83d\udcac 61 \ud83d\udc4d 104   \u2022   \ud83d\udd50 <t:1795626826:f>"
             },
             {
               "type": 14,
@@ -272,7 +272,13 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 1
+    "relay_revision": 2,
+    "message_ids": [
+      "1575199622371221514"
+    ],
+    "continuations": [],
+    "last_checked": 1795629050.3676095,
+    "edited_at": 1795629050.3696187
   },
   "HonkaiStarRail_leaks_1y566sw": {
     "subreddit": "HonkaiStarRail_leaks",
