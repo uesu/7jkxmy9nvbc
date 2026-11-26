@@ -189,103 +189,11 @@
     "message_id": "1575486423610433597",
     "delivered_at": 1795695632,
     "published_ts": 1795695014,
-    "payload": {
-      "flags": 32768,
-      "components": [
-        {
-          "type": 17,
-          "accent_color": 16729344,
-          "components": [
-            {
-              "type": 10,
-              "content": "### [New liyue artifact set description via uncle rex lapis](https://www.reddit.com/r/Genshin_Impact_Leaks/comments/1y5zpa5/new_liyue_artifact_set_description_via_uncle_rex/)\n*by Ok-Show3747 in r/Genshin_Impact_Leaks*"
-            },
-            {
-              "type": 10,
-              "content": "Finally some glaze.\n\nGlory to reason lmao\n\nI cant change the title my bad\n\nNew artifact set- epochal advent"
-            },
-            {
-              "type": 14,
-              "divider": true,
-              "spacing": 1
-            },
-            {
-              "type": 12,
-              "items": [
-                {
-                  "media": {
-                    "url": "https://i.redd.it/9ho2iml77y3i1.jpeg"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/sftcifo77y3i1.jpeg"
-                  }
-                },
-                {
-                  "media": {
-                    "url": "https://i.redd.it/8cxp8lq77y3i1.jpeg"
-                  }
-                }
-              ]
-            },
-            {
-              "type": 10,
-              "content": "-# \ud83d\udcac 30 \ud83d\udc4d 24   \u2022   \ud83d\udd50 <t:1795695014:f>"
-            },
-            {
-              "type": 14,
-              "divider": true,
-              "spacing": 1
-            },
-            {
-              "type": 1,
-              "components": [
-                {
-                  "type": 2,
-                  "style": 5,
-                  "label": "Read Post",
-                  "url": "https://www.reddit.com/r/Genshin_Impact_Leaks/comments/1y5zpa5/new_liyue_artifact_set_description_via_uncle_rex/",
-                  "emoji": {
-                    "id": "1472388018689282261",
-                    "name": "starwardhmm",
-                    "animated": true
-                  }
-                },
-                {
-                  "type": 2,
-                  "style": 5,
-                  "label": "Citlali News",
-                  "url": "https://discord.gg/HyrVP9wRXu",
-                  "emoji": {
-                    "id": "1439878792653832253",
-                    "name": "starward11",
-                    "animated": true
-                  }
-                },
-                {
-                  "type": 2,
-                  "style": 5,
-                  "label": "Donate",
-                  "url": "https://ko-fi.com/jieunlatte",
-                  "emoji": {
-                    "id": "1509026327548657914",
-                    "name": "starwardfans",
-                    "animated": true
-                  }
-                }
-              ]
-            },
-            {
-              "type": 10,
-              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
-            }
-          ]
-        }
-      ]
-    },
     "relay_auto_edit": true,
-    "relay_revision": 2
+    "relay_revision": 2,
+    "retracted": true,
+    "retracted_at": 1795697428,
+    "retracted_reason": "deleted by author or Reddit"
   },
   "Genshin_Impact_Leaks_1y5zr8h": {
     "subreddit": "Genshin_Impact_Leaks",
