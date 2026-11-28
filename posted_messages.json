@@ -2524,6 +2524,18 @@
     "message_id": "1576281747098960063",
     "delivered_at": 1795885241,
     "published_ts": 1795884906,
+    "relay_auto_edit": true,
+    "relay_revision": 1,
+    "retracted": true,
+    "retracted_at": 1795885829,
+    "retracted_reason": "deleted by author or Reddit"
+  },
+  "WutheringWavesLeaks_1y7qx33": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7qx33/40_new_location_on_the_map_by_seele/",
+    "message_id": "1576284181506298040",
+    "delivered_at": 1795885829,
+    "published_ts": 1795885446,
     "payload": {
       "flags": 32768,
       "components": [
@@ -2533,11 +2545,7 @@
           "components": [
             {
               "type": 10,
-              "content": "### [4.0 | About New Synthesis](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qp0k/40_about_new_synthesis/)\n*by Delumenum in r/WutheringWavesLeaks*"
-            },
-            {
-              "type": 10,
-              "content": "[removed]"
+              "content": "### [4.0 | New Location on the Map by Seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qx33/40_new_location_on_the_map_by_seele/)\n*by Delumenum in r/WutheringWavesLeaks*"
             },
             {
               "type": 14,
@@ -2549,14 +2557,14 @@
               "items": [
                 {
                   "media": {
-                    "url": "https://i.redd.it/4darjgxuvd4i1.png"
+                    "url": "https://vxreddit.com/redditvideo.mp4?video_url=https%3A%2F%2Fv.redd.it%2Fk5r5lqlgxd4i1%2FCMAF_480.m3u8&audio_url=https%3A%2F%2Fv.redd.it%2Fk5r5lqlgxd4i1%2FCMAF_AUDIO_128.m3u8"
                   }
                 }
               ]
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 5 \ud83d\udc4d 19   \u2022   \ud83d\udd50 <t:1795884906:f>"
+              "content": "-# \ud83d\udcac 11 \ud83d\udc4d 37   \u2022   \ud83d\udd50 <t:1795885446:f>"
             },
             {
               "type": 14,
@@ -2570,7 +2578,202 @@
                   "type": 2,
                   "style": 5,
                   "label": "Read Post",
-                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qp0k/40_about_new_synthesis/",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qx33/40_new_location_on_the_map_by_seele/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7qzqq": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7qzqq/40_more_matrix_stuffs_via_seele/",
+    "message_id": "1576284200741376012",
+    "delivered_at": 1795885829,
+    "published_ts": 1795885640,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | More Matrix Stuffs via Seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qzqq/40_more_matrix_stuffs_via_seele/)\n*by Shirasaki- in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/juzcmhptxd4i1.jpeg"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/7nnyjoptxd4i1.jpeg"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/mfiyvkptxd4i1.jpeg"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/r5du2rptxd4i1.jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 3 \ud83d\udc4d 5   \u2022   \ud83d\udd50 <t:1795885640:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qzqq/40_more_matrix_stuffs_via_seele/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7r0bg": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7r0bg/40_new_fed_via_seele/",
+    "message_id": "1576284216810016980",
+    "delivered_at": 1795885829,
+    "published_ts": 1795885681,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | new fed via seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7r0bg/40_new_fed_via_seele/)\n*by Cute_River_3852 in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://vxreddit.com/redditvideo.mp4?video_url=https%3A%2F%2Fv.redd.it%2F1lc60a13yd4i1%2FCMAF_480.m3u8&audio_url=https%3A%2F%2Fv.redd.it%2F1lc60a13yd4i1%2FCMAF_AUDIO_128.m3u8"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 4 \ud83d\udc4d 8   \u2022   \ud83d\udd50 <t:1795885681:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7r0bg/40_new_fed_via_seele/",
                   "emoji": {
                     "id": "1472388018689282261",
                     "name": "starwardhmm",
@@ -3185,7 +3388,7 @@
             },
             {
               "type": 10,
-              "content": "Buff used: TBD\n\u00b7 When there is an **\\[Assist\\]** specialty Agent in the squad, the whole squad's CRIT DMG is **increased by 40%**.\n\u00b7 When an Agent's attack hits an enemy, it ignores **25%** of the enemy's **Wind DMG RES**, and DMG dealt by **\\[Basic Attack\\]** is **increased by 40%**. https://zzz.nanoka.cc/boss/690541\n\nHaven't seen anyone post gameplay yet. Don't take this showcase too seriously. Just wanted to post something for people to see how she functions."
+              "content": "Buff used: TBD\n\u00b7 When there is an **\\[Assist\\]** specialty Agent in the squad, the whole squad's CRIT DMG is **increased by 40%**.\n\u00b7 When an Agent's attack hits an enemy, it ignores **25%** of the enemy's **Wind DMG RES**, and DMG dealt by **\\[Basic Attack\\]** is **increased by 40%**. https://zzz.nanoka.cc/boss/690541\n\nHaven't seen anyone post gameplay yet. Don't take this showcase too seriously. Just wanted to post something for people to see how she functions. Forgot to add Butcher is 134M HP."
             },
             {
               "type": 14,
@@ -3204,7 +3407,7 @@
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 10 \ud83d\udc4d 38   \u2022   \ud83d\udd50 <t:1795883342:f>"
+              "content": "-# \ud83d\udcac 42 \ud83d\udc4d 99   \u2022   \ud83d\udd50 <t:1795883342:f>"
             },
             {
               "type": 14,
@@ -3269,10 +3472,16 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 1,
+    "relay_revision": 2,
     "extra_message_ids": [
       "1576276657982148719"
     ],
-    "youtube_message_id": "1576276657982148719"
+    "youtube_message_id": "1576276657982148719",
+    "message_ids": [
+      "1576276653842239669"
+    ],
+    "continuations": [],
+    "last_checked": 1795885832.8981652,
+    "edited_at": 1795885832.9050758
   }
 }
