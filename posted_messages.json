@@ -492,6 +492,105 @@
     "relay_auto_edit": true,
     "relay_revision": 1
   },
+  "WutheringWavesLeaks_1y7omlh": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7omlh/40_updated_feature_and_missions_for_matrix_via/",
+    "message_id": "1576259078445989969",
+    "delivered_at": 1795879842,
+    "published_ts": 1795879583,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | Updated Feature and Missions for Matrix via seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7omlh/40_updated_feature_and_missions_for_matrix_via/)\n*by Shirasaki- in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 10,
+              "content": "Update Notes for \"Final Matrix\"\n\\[Special Circuits\\]\nIn the \"Amplification Circuit\" interface, players can select \"Special Circuits\" that significantly boost combat capabilities. Equipping a Special Circuit requires the additional selection of three Resonators; the Fatigue value of the chosen Resonators will be completely reset."
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/zqfw5hxtfd4i1.jpeg"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/q7oj2e6zfd4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 16 \ud83d\udc4d 14   \u2022   \ud83d\udd50 <t:1795879583:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7omlh/40_updated_feature_and_missions_for_matrix_via/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
   "Zenlesszonezeroleaks__1y7ikcq": {
     "subreddit": "Zenlesszonezeroleaks_",
     "path": "/r/Zenlesszonezeroleaks_/comments/1y7ikcq/iridescent_starsong_wengine_showcase_video/",
@@ -1110,6 +1209,171 @@
                   "style": 5,
                   "label": "Read Post",
                   "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7ns4p/cecilia_new_model_comparison_via_tokoyomarae/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "Zenlesszonezeroleaks__1y7ols2": {
+    "subreddit": "Zenlesszonezeroleaks_",
+    "path": "/r/Zenlesszonezeroleaks_/comments/1y7ols2/350_new_minigameevent_tutorials_via_gachabase/",
+    "message_id": "1576259058242158654",
+    "delivered_at": 1795879842,
+    "published_ts": 1795879521,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [[3.5.0] New Minigame/Event Tutorials via Gachabase](https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7ols2/350_new_minigameevent_tutorials_via_gachabase/)\n*by MeatballSandwi in r/Zenlesszonezeroleaks_*"
+            },
+            {
+              "type": 10,
+              "content": "Three new minigames.\n\nA 2v6 like Prop Hunt or Deceive Inc where bangboo hiders try to blend in with NPCs and try to do objectives while 2 players hunt them.\n\nRing toss.\n\nSubway Surfers clone."
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/sh0iudxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/4mlnbdxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/nawvgcxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/w6re8dxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/l9m0wdxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/cdqcafxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/t59fvixkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/g0fhjexkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/y60mkexkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/wjz15fxkfd4i1.png"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/8f2xgfxkfd4i1.png"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/6yea2dxkfd4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 3 \ud83d\udc4d 17   \u2022   \ud83d\udd50 <t:1795879521:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7ols2/350_new_minigameevent_tutorials_via_gachabase/",
                   "emoji": {
                     "id": "1472388018689282261",
                     "name": "starwardhmm",
