@@ -988,7 +988,7 @@
             },
             {
               "type": 10,
-              "content": "Changelog: https://zzz.gachabase.net/changelog/beta#v3.5.0-rev-20893147\n\\---\n\\*\\*\\[Agents\\] Secilia\\*\\*\n\n|- \\*\\*Chinese\\*\\*: - (\\[Full\\](https://zzz.gachabase.net/agents/1671/1671/beta?lang=chs))\n\n|- \\*\\*English\\*\\*: - (\\[Full\\](https://zzz.gachabase.net/agents/1671/1671/beta?lang=en))\n\n\\*\\*\\[W-Engines\\] Perfect Audience\\*\\*\n\n|- \\*\\*Chinese\\*\\*: - (\\[Full\\](https://zzz.gachabase.net/w-engines/13024/perfect-audience/beta?lang=chs))\n\n|- \\*\\*English\\*\\*: - (\\[Full\\](https://zzz.gachabase.net/w-engines/13024/perfect-audience/beta?lang=en))\n\n\\*\\*\\[W-Engines\\] Lost Pearl of the Ocean's Heart\\*\\*\n\n|- \\*\\*Chinese\\*\\*: - (\\[Full\\](https://zzz.gachabase.net/w-engines/14167/lost-pearl-of-the-oceans-heart/beta?lang=chs))\n\n|- \\*\\*English\\*\\*: - (\\[Full\\](https://zzz.gachabase.net/w-engines/14167/lost-pearl-of-the-oceans-heart/beta?lang=en))"
+              "content": "Changelog: https://zzz.gachabase.net/changelog/beta#v3.5.0-rev-20893147\n---\n**[Agents] Secilia**\n\n|- **Chinese**: - ([Full](https://zzz.gachabase.net/agents/1671/1671/beta?lang=chs))\n\n|- **English**: - ([Full](https://zzz.gachabase.net/agents/1671/1671/beta?lang=en))\n\n**[W-Engines] Perfect Audience**\n\n|- **Chinese**: - ([Full](https://zzz.gachabase.net/w-engines/13024/perfect-audience/beta?lang=chs))\n\n|- **English**: - ([Full](https://zzz.gachabase.net/w-engines/13024/perfect-audience/beta?lang=en))\n\n**[W-Engines] Lost Pearl of the Ocean's Heart**\n\n|- **Chinese**: - ([Full](https://zzz.gachabase.net/w-engines/14167/lost-pearl-of-the-oceans-heart/beta?lang=chs))\n\n|- **English**: - ([Full](https://zzz.gachabase.net/w-engines/14167/lost-pearl-of-the-oceans-heart/beta?lang=en))"
             },
             {
               "type": 14,
@@ -1007,7 +1007,7 @@
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 23 \ud83d\udc4d 28   \u2022   \ud83d\udd50 <t:1795841764:f>"
+              "content": "-# \ud83d\udcac 85 \ud83d\udc4d 83   \u2022   \ud83d\udd50 <t:1795841764:f>"
             },
             {
               "type": 14,
@@ -1061,6 +1061,12 @@
       ]
     },
     "relay_auto_edit": true,
-    "relay_revision": 1
+    "relay_revision": 2,
+    "message_ids": [
+      "1576100519313801340"
+    ],
+    "continuations": [],
+    "last_checked": 1795842637.5459385,
+    "edited_at": 1795842637.5502203
   }
 }
