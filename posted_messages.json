@@ -1794,12 +1794,12 @@
     "relay_auto_edit": true,
     "relay_revision": 1
   },
-  "Zenlesszonezeroleaks__1y7jnkn": {
-    "subreddit": "Zenlesszonezeroleaks_",
-    "path": "/r/Zenlesszonezeroleaks_/comments/1y7jnkn/zzz_350_hugies_phone_kokia_via_exagide/",
-    "message_id": "1576193568429711362",
-    "delivered_at": 1795864228,
-    "published_ts": 1795864164,
+  "WutheringWavesLeaks_1y7q2tj": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7q2tj/40_anna_lucielle_character_menu_animations_via/",
+    "message_id": "1576276630480097362",
+    "delivered_at": 1795884030,
+    "published_ts": 1795883329,
     "payload": {
       "flags": 32768,
       "components": [
@@ -1809,7 +1809,7 @@
           "components": [
             {
               "type": 10,
-              "content": "### [[ZZZ 3.5.0] Hugie's phone kokia via Exagide](https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7jnkn/zzz_350_hugies_phone_kokia_via_exagide/)\n*by Fell-V in r/Zenlesszonezeroleaks_*"
+              "content": "### [4.0 - Anna & Lucielle character menu animations via Seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7q2tj/40_anna_lucielle_character_menu_animations_via/)\n*by PriscentSnow in r/WutheringWavesLeaks*"
             },
             {
               "type": 14,
@@ -1821,14 +1821,14 @@
               "items": [
                 {
                   "media": {
-                    "url": "https://i.redd.it/sehyg8956c4i1.jpeg"
+                    "url": "https://vxreddit.com/redditvideo.mp4?video_url=https%3A%2F%2Fv.redd.it%2Fvepf1rh5rd4i1%2FCMAF_480.m3u8&audio_url=https%3A%2F%2Fv.redd.it%2Fvepf1rh5rd4i1%2FCMAF_AUDIO_128.m3u8"
                   }
                 }
               ]
             },
             {
               "type": 10,
-              "content": "-# \ud83d\udcac 3 \ud83d\udc4d 4   \u2022   \ud83d\udd50 <t:1795864164:f>"
+              "content": "-# \ud83d\udcac 21 \ud83d\udc4d 84   \u2022   \ud83d\udd50 <t:1795883329:f>"
             },
             {
               "type": 14,
@@ -1842,7 +1842,97 @@
                   "type": 2,
                   "style": 5,
                   "label": "Read Post",
-                  "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7jnkn/zzz_350_hugies_phone_kokia_via_exagide/",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7q2tj/40_anna_lucielle_character_menu_animations_via/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7qblc": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7qblc/40_story_journal_update_by_seele/",
+    "message_id": "1576276672980717740",
+    "delivered_at": 1795884030,
+    "published_ts": 1795883955,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | Story Journal Update by Seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qblc/40_story_journal_update_by_seele/)\n*by Delumenum in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/4r55ms51td4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 1 \ud83d\udc4d 5   \u2022   \ud83d\udd50 <t:1795883955:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7qblc/40_story_journal_update_by_seele/",
                   "emoji": {
                     "id": "1472388018689282261",
                     "name": "starwardhmm",
@@ -2437,5 +2527,114 @@
     },
     "relay_auto_edit": true,
     "relay_revision": 1
+  },
+  "Zenlesszonezeroleaks__1y7q2zn": {
+    "subreddit": "Zenlesszonezeroleaks_",
+    "path": "/r/Zenlesszonezeroleaks_/comments/1y7q2zn/m0w1_cecilia_m0w1_sigrid_m0w1_norma_vs_dead_end/",
+    "message_id": "1576276653842239669",
+    "delivered_at": 1795884030,
+    "published_ts": 1795883342,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [M0W1 Cecilia | M0W1 Sigrid | M0W1 Norma vs Dead End Butcher | 60K Kill](https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7q2zn/m0w1_cecilia_m0w1_sigrid_m0w1_norma_vs_dead_end/)\n*by CrimsonBlade324 in r/Zenlesszonezeroleaks_*"
+            },
+            {
+              "type": 10,
+              "content": "Buff used: TBD\n\u00b7 When there is an **\\[Assist\\]** specialty Agent in the squad, the whole squad's CRIT DMG is **increased by 40%**.\n\u00b7 When an Agent's attack hits an enemy, it ignores **25%** of the enemy's **Wind DMG RES**, and DMG dealt by **\\[Basic Attack\\]** is **increased by 40%**. https://zzz.nanoka.cc/boss/690541\n\nHaven't seen anyone post gameplay yet. Don't take this showcase too seriously. Just wanted to post something for people to see how she functions."
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.ytimg.com/vi/lmyiYdjqA8w/maxresdefault.jpg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 10 \ud83d\udc4d 38   \u2022   \ud83d\udd50 <t:1795883342:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7q2zn/m0w1_cecilia_m0w1_sigrid_m0w1_norma_vs_dead_end/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "YouTube",
+                  "url": "https://www.youtube.com/watch?v=lmyiYdjqA8w",
+                  "emoji": {
+                    "id": "1483083423290490891",
+                    "name": "starwardspark3",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1,
+    "extra_message_ids": [
+      "1576276657982148719"
+    ],
+    "youtube_message_id": "1576276657982148719"
   }
 }
