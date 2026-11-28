@@ -1,4 +1,98 @@
 {
+  "WutheringWavesLeaks_1y7mjt4": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7mjt4/overview_of_40_beta_via_seele/",
+    "message_id": "1576236395809345558",
+    "delivered_at": 1795874439,
+    "published_ts": 1795873874,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [Overview of 4.0 beta via seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7mjt4/overview_of_40_beta_via_seele/)\n*by ISRUKRENG in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 10,
+              "content": "The following content will be partially available in the upcoming version. Rovers, please plan your testing time accordingly to experience these features.\n\n\\[Description of New Content Added for Testing\\]\n\n\u2726 New Characters: Five-star Resonators: \"Anna,\" \"Lucielle\"\n\u2726 New Weapons: Five-star Weapons: \"Nightmare Desire,\" \"Meow\"\n\u2726 New Events:\n\u2460 Testing Server-Exclusive Event: \\[Pioneer Server Test Event\\]\n\u2461 Version Event: \\[Block Battle: Fate's Gambit\\]\n\u2726 Other New Content:\n\u2460 New Relic Echoes: \"Path of Blood Thorns,\" \"Vow for Tomorrow\"\n\u2461 New Relics: \"Shadaris,\" \"Beast of Bewilderment,\" \"Polemos,\" \"Sunken Ship Saint,\" \"Lost Ship Shark,\" \"Iron Roar,\" \"Ebar,\" \"Sand Star Spire,\" \"Booming Species: Boom Boom,\" \"Mirapo MBD-01,\" \"Deep Diver,\" \"Mining Surveyor,\" \"Redio LDR600\"\n\u2462 New Aberrant Relics: \"Sunken Ship Saint,\" \"Lost Ship Shark,\" \"Mirapo,\" \"Shadow Flicker\"\n\u2463 New Holographic Strategies: \"Thousand Puppets, Towering Heights: Echoes from the Abyss\"\n\u2464 Updates to \"Echoing Song of the Sea,\" \"Adversity Deep Tower,\" and \"Thousand Gates\" (Cycle Updates)\n\u2465 \"End Matrix\" Season Update\n\n\u2726 \\[Description of Optimization Content\\]\n\n\u2460 Wanderer's Trail Optimization\nThe newly upgraded Wanderer's Trail summarizes the storylines and exploration content of various regions. Wanderers can easily access and experience the following:\n\\- View the progress of \"Tidal Tasks,\" \"Companion Star Tasks,\" \"Strange Tales Tasks,\" \"Perilous Journey Tasks,\" and \"Chronicle Tasks\" in the selected region.\n\\- View the progress of the \"Exploration Level\" in the selected region.\n\\- Includes all \"Strong Enemy Challenges\" in the selected region.\n\\- Includes related information such as \"Resonator Encounters,\" \"Special Collectibles,\" and \"Anecdotes\" in the selected region."
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/xgx90ab0zc4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 41 \ud83d\udc4d 34   \u2022   \ud83d\udd50 <t:1795873874:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7mjt4/overview_of_40_beta_via_seele/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
   "Zenlesszonezeroleaks__1y7ikcq": {
     "subreddit": "Zenlesszonezeroleaks_",
     "path": "/r/Zenlesszonezeroleaks_/comments/1y7ikcq/iridescent_starsong_wengine_showcase_video/",
@@ -318,6 +412,96 @@
                   "style": 5,
                   "label": "Read Post",
                   "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7k7es/zzz_350_cecilia_test_teams_posted_on_uncle_maha/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "Zenlesszonezeroleaks__1y7mo8x": {
+    "subreddit": "Zenlesszonezeroleaks_",
+    "path": "/r/Zenlesszonezeroleaks_/comments/1y7mo8x/cecilia_ep_in_zzzfes/",
+    "message_id": "1576236416919142405",
+    "delivered_at": 1795874439,
+    "published_ts": 1795874244,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [Cecilia EP in ZZZFES](https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7mo8x/cecilia_ep_in_zzzfes/)\n*by AMENight333 in r/Zenlesszonezeroleaks_*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://vxreddit.com/redditvideo.mp4?video_url=https%3A%2F%2Fv.redd.it%2Fnfb73wo20d4i1%2FCMAF_480.m3u8&audio_url=https%3A%2F%2Fv.redd.it%2Fnfb73wo20d4i1%2FCMAF_AUDIO_128.m3u8"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 4 \ud83d\udc4d 22   \u2022   \ud83d\udd50 <t:1795874244:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/Zenlesszonezeroleaks_/comments/1y7mo8x/cecilia_ep_in_zzzfes/",
                   "emoji": {
                     "id": "1472388018689282261",
                     "name": "starwardhmm",
