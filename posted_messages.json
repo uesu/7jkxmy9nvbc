@@ -1153,6 +1153,545 @@
     "relay_auto_edit": true,
     "relay_revision": 1
   },
+  "WutheringWavesLeaks_1y7pgn6": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7pgn6/nanoka_updated_to_400/",
+    "message_id": "1576269068888178751",
+    "delivered_at": 1795882229,
+    "published_ts": 1795881754,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [Nanoka updated to 4.0.0](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pgn6/nanoka_updated_to_400/)\n*by PriscentSnow in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 10,
+              "content": "https://ww.nanoka.cc/\n\nclick on the hyperlinks below to read the full kits\n\n\\- [**Anna**](https://ww.nanoka.cc/character/1213)\n\\- [**Lucielle**](https://ww.nanoka.cc/character/1513)\n\\- [**Old Fang**](https://ww.nanoka.cc/weapon/21010114) **-** Calcharo new sig?\n\\- [**Meow**](https://ww.nanoka.cc/weapon/21030086) **-** Lucielle sig\n\\- [**Nightmare's Desire**](https://ww.nanoka.cc/weapon/21050126) **-** Anna sig\n\\- [**Projection: Ocean's Gift**](https://ww.nanoka.cc/weapon/80080010)"
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 23 \ud83d\udc4d 24   \u2022   \ud83d\udd50 <t:1795881754:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pgn6/nanoka_updated_to_400/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7pgx8": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7pgx8/40_anna_lucielle_mecha_suits_skill_icons_via/",
+    "message_id": "1576269088567591005",
+    "delivered_at": 1795882229,
+    "published_ts": 1795881775,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | Anna, Lucielle & Mecha Suits skill icons via hiragara](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pgx8/40_anna_lucielle_mecha_suits_skill_icons_via/)\n*by Shirasaki- in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/icz9m36kld4i1.jpeg"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/rho6zgkcmd4i1.jpeg"
+                  }
+                },
+                {
+                  "media": {
+                    "url": "https://i.redd.it/yznuuw0hmd4i1.jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 11 \ud83d\udc4d 23   \u2022   \ud83d\udd50 <t:1795881775:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pgx8/40_anna_lucielle_mecha_suits_skill_icons_via/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7phbq": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7phbq/calcharo_sig_4_star_weapon/",
+    "message_id": "1576269102178246817",
+    "delivered_at": 1795882229,
+    "published_ts": 1795881803,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [Calcharo sig 4 star weapon](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7phbq/calcharo_sig_4_star_weapon/)\n*by ISRUKRENG in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/i7pvhzalmd4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 29 \ud83d\udc4d 52   \u2022   \ud83d\udd50 <t:1795881803:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7phbq/calcharo_sig_4_star_weapon/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7plen": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7plen/40_reruns_via_seele/",
+    "message_id": "1576269116375834816",
+    "delivered_at": 1795882229,
+    "published_ts": 1795882093,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 reruns via seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7plen/40_reruns_via_seele/)\n*by ISRUKRENG in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/6rxhaowgnd4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 11 \ud83d\udc4d 14   \u2022   \ud83d\udd50 <t:1795882093:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7plen/40_reruns_via_seele/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7pmee": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7pmee/40_additional_vigor_for_rebecca_next_matrix_via/",
+    "message_id": "1576269129860517931",
+    "delivered_at": 1795882229,
+    "published_ts": 1795882166,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 | Additional vigor for Rebecca Next Matrix via Seele](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pmee/40_additional_vigor_for_rebecca_next_matrix_via/)\n*by Shirasaki- in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/jy9foramnd4i1.jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 4 \ud83d\udc4d 6   \u2022   \ud83d\udd50 <t:1795882166:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pmee/40_additional_vigor_for_rebecca_next_matrix_via/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
+  "WutheringWavesLeaks_1y7pmi0": {
+    "subreddit": "WutheringWavesLeaks",
+    "path": "/r/WutheringWavesLeaks/comments/1y7pmi0/40_banners_via_nanoka_cyberpunk_reruns_apparently/",
+    "message_id": "1576269144372813916",
+    "delivered_at": 1795882229,
+    "published_ts": 1795882173,
+    "payload": {
+      "flags": 32768,
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 16729344,
+          "components": [
+            {
+              "type": 10,
+              "content": "### [4.0 banners via nanoka (cyberpunk reruns apparently)](https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pmi0/40_banners_via_nanoka_cyberpunk_reruns_apparently/)\n*by ISRUKRENG in r/WutheringWavesLeaks*"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 12,
+              "items": [
+                {
+                  "media": {
+                    "url": "https://i.redd.it/siij5ywond4i1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# \ud83d\udcac 5 \ud83d\udc4d 6   \u2022   \ud83d\udd50 <t:1795882173:f>"
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Read Post",
+                  "url": "https://www.reddit.com/r/WutheringWavesLeaks/comments/1y7pmi0/40_banners_via_nanoka_cyberpunk_reruns_apparently/",
+                  "emoji": {
+                    "id": "1472388018689282261",
+                    "name": "starwardhmm",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Citlali News",
+                  "url": "https://discord.gg/HyrVP9wRXu",
+                  "emoji": {
+                    "id": "1439878792653832253",
+                    "name": "starward11",
+                    "animated": true
+                  }
+                },
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Donate",
+                  "url": "https://ko-fi.com/jieunlatte",
+                  "emoji": {
+                    "id": "1509026327548657914",
+                    "name": "starwardfans",
+                    "animated": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": 10,
+              "content": "-# It takes time, tools, hosting and ongoing maintenance to keep the news working. If it helps you stay updated, consider supporting so it can keep improving <a:starwardlove:1570666942233055312>"
+            }
+          ]
+        }
+      ]
+    },
+    "relay_auto_edit": true,
+    "relay_revision": 1
+  },
   "Zenlesszonezeroleaks__1y7jnkn": {
     "subreddit": "Zenlesszonezeroleaks_",
     "path": "/r/Zenlesszonezeroleaks_/comments/1y7jnkn/zzz_350_hugies_phone_kokia_via_exagide/",
